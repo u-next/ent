@@ -371,15 +371,17 @@ func (r *columnExpr) Query() (string, []any) {
 	} else if r.expr != nil {
 		r.Join(r.expr)
 		if r.alias != "" {
-			r.Pad().WriteString("AS").Pad().Ident(r.alias)
+			r.WriteString(" AS ")
+			r.Ident(r.alias)
 		}
 		if r.collate != "" {
-			r.Pad().WriteString("COLLATE").Pad().WriteString(r.collate)
+			r.WriteString(" COLLATE ")
+			r.WriteString(r.collate)
 		}
 		if r.desc {
-			r.Pad().WriteString("DESC")
+			r.WriteString(" DESC")
 		} else if r.asc {
-			r.Pad().WriteString("ASC")
+			r.WriteString(" ASC")
 		}
 	}
 	return r.String(), r.args
@@ -457,23 +459,27 @@ func (r *ReturnBuilder) Query() (string, []any) {
 	r.Pad()
 	r.JoinComma(r.items...)
 	if len(r.groupBy) > 0 {
-		r.NewLine().WriteString("GROUP BY ")
+		r.NewLine()
+		r.WriteString("GROUP BY ")
 		r.JoinComma(r.groupBy...)
 	}
 
 	if len(r.orderBy) > 0 {
-		r.NewLine().WriteString("ORDER BY ")
+		r.NewLine()
+		r.WriteString("ORDER BY ")
 		r.JoinComma(r.orderBy...)
 	}
 
 	if r.limit != 0 {
 		r.NewLine()
-		r.WriteString("LIMIT ").WriteString(strconv.FormatInt(r.limit, 10))
+		r.WriteString("LIMIT ")
+		r.WriteString(strconv.FormatInt(r.limit, 10))
 	}
 
 	if r.offset != 0 {
 		r.NewLine()
-		r.WriteString("OFFSET ").WriteString(strconv.FormatInt(r.offset, 10))
+		r.WriteString("OFFSET ")
+		r.WriteString(strconv.FormatInt(r.offset, 10))
 	}
 
 	return r.String(), r.args
@@ -531,7 +537,8 @@ func (l *LetBuilder) Query() (string, []any) {
 		if i > 0 {
 			l.Comma().Pad()
 		}
-		l.WriteString(assign.variable).WriteString(" = ")
+		l.WriteString(assign.variable)
+		l.WriteString(" = ")
 		l.Join(assign.value)
 	}
 	return l.String(), l.args
@@ -560,7 +567,7 @@ func (g *GroupByBuilder) Append(items ...*columnExpr) *GroupByBuilder {
 
 // Query returns the GROUP BY statement representation.
 func (g *GroupByBuilder) Query() (string, []any) {
-	g.WriteString("GROUP BY").Pad()
+	g.WriteString("GROUP BY ")
 	g.JoinComma(g.exprs...)
 	return g.String(), g.args
 }
@@ -588,7 +595,7 @@ func (o *OrderByBuilder) Append(orders ...*columnExpr) *OrderByBuilder {
 
 // Query returns the ORDER BY statement representation.
 func (o *OrderByBuilder) Query() (string, []any) {
-	o.WriteString("ORDER BY").Pad()
+	o.WriteString("ORDER BY ")
 	o.JoinComma(o.orders...)
 	return o.String(), o.args
 }
@@ -696,14 +703,17 @@ func (f *ForBuilder) WithOffsetAs(name string) *ForBuilder {
 
 // Query returns the FOR statement representation.
 func (f *ForBuilder) Query() (string, []any) {
-	f.WriteString("FOR ").WriteString(f.element).WriteString(" IN ")
+	f.WriteString("FOR ")
+	f.WriteString(f.element)
+	f.WriteString(" IN ")
 	if f.array != nil {
 		f.Join(f.array)
 	}
 	if f.offset != "" {
 		f.WriteString(" WITH OFFSET")
 		if f.offset != "offset" {
-			f.WriteString(" AS ").WriteString(f.offset)
+			f.WriteString(" AS ")
+			f.WriteString(f.offset)
 		}
 	}
 	return f.String(), f.args
@@ -783,7 +793,8 @@ func (w *WithBuilder) Query() (string, []any) {
 	w.JoinComma(w.items...)
 
 	if len(w.groupBy) > 0 {
-		w.NewLine().WriteString("GROUP BY ")
+		w.NewLine()
+		w.WriteString("GROUP BY ")
 		w.JoinComma(w.groupBy...)
 	}
 
@@ -900,7 +911,9 @@ func (g *GraphTableWrapper) As(alias string) *GraphTableWrapper {
 func (g *GraphTableWrapper) Query() (string, []any) {
 	g.WriteString("GRAPH_TABLE").Wrap(func(b *Builder) {
 		if g.graph != "" {
-			b.NewLine().Indent(1).Ident(g.graph).NewLine()
+			b.NewLine()
+			b.Indent(1).Ident(g.graph)
+			b.NewLine()
 		}
 
 		for i, stmt := range g.stmts {
@@ -914,7 +927,8 @@ func (g *GraphTableWrapper) Query() (string, []any) {
 	})
 
 	if g.alias != "" {
-		g.Pad().WriteString("AS").Pad().Ident(g.alias)
+		g.WriteString(" AS ")
+		g.Ident(g.alias)
 	}
 
 	return g.String(), g.args
@@ -1553,7 +1567,8 @@ func (p *PathPattern) C(column string) string {
 // Query returns the path pattern representation.
 func (p *PathPattern) Query() (string, []any) {
 	if p.variable != "" {
-		p.WriteString(p.variable).WriteString(" = ")
+		p.WriteString(p.variable)
+		p.WriteString(" = ")
 	}
 
 	// Path search prefix (cannot be combined with path mode)
@@ -2004,22 +2019,21 @@ func NewOpenBoundedQuantifier(upperBound int) *QuantifierBuilder {
 
 // Query returns the quantifier representation.
 func (q *QuantifierBuilder) Query() (string, []any) {
-	q.WriteByte('{')
-
-	switch q.quantifierType {
-	case QuantifierFixed:
-		q.WriteString(strconv.Itoa(q.bound))
-	case QuantifierBounded:
-		if q.lowerBound > 0 {
-			q.WriteString(strconv.Itoa(q.lowerBound))
+	q.WrapBraces(func(b *Builder) {
+		switch q.quantifierType {
+		case QuantifierFixed:
+			b.WriteString(strconv.Itoa(q.bound))
+		case QuantifierBounded:
+			if q.lowerBound > 0 {
+				b.WriteString(strconv.Itoa(q.lowerBound))
+			}
+			b.Comma()
+			if q.upperBound > 0 {
+				b.WriteString(strconv.Itoa(q.upperBound))
+			}
 		}
-		q.WriteByte(',')
-		if q.upperBound > 0 {
-			q.WriteString(strconv.Itoa(q.upperBound))
-		}
-	}
+	})
 
-	q.WriteByte('}')
 	return q.String(), q.args
 }
 
