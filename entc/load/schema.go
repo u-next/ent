@@ -81,6 +81,11 @@ type Edge struct {
 	StorageKey  *edge.StorageKey       `json:"storage_key,omitempty"`
 	Annotations map[string]any         `json:"annotations,omitempty"`
 	Comment     string                 `json:"comment,omitempty"`
+
+	// Polymorphic edge support
+	AllowedTypes           []string `json:"allowed_types,omitempty"`
+	TypeDiscriminatorField string   `json:"type_discriminator_field,omitempty"`
+	IsPolymorphic          bool     `json:"is_polymorphic,omitempty"`
 }
 
 // Index represents an ent.Index that was loaded from a complied user package.
@@ -108,6 +113,11 @@ func NewEdge(ed *edge.Descriptor) *Edge {
 		StorageKey:  ed.StorageKey,
 		Comment:     ed.Comment,
 		Annotations: make(map[string]any),
+
+		// Polymorphic edge support
+		AllowedTypes:           ed.AllowedTypes,
+		TypeDiscriminatorField: ed.TypeDiscriminatorField,
+		IsPolymorphic:          ed.IsPolymorphic,
 	}
 	for _, at := range ed.Annotations {
 		ne.addAnnotation(at)

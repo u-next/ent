@@ -62,6 +62,11 @@ type (
 			ID       []*Field
 			To, From *Edge
 		}
+		// PropertyGraph holds property graph specific information for this type.
+		PropertyGraph struct {
+			// Labels holds the explicit labels defined for this type in property graphs.
+			Labels []PropertyGraphLabel
+		}
 	}
 
 	// Field holds the information of a type field used for the templates.
@@ -102,6 +107,10 @@ type (
 		Annotations Annotations
 		// referenced foreign-key.
 		fk *ForeignKey
+		// PropertyGraph holds property graph specific information for this field.
+		PropertyGraph struct {
+			// Reserved for future property graph field-specific features
+		}
 	}
 
 	// Edge of a graph between two types.
@@ -143,6 +152,17 @@ type (
 		// Annotations that were defined for the edge in the schema.
 		// The mapping is from the Annotation.Name() to a JSON decoded object.
 		Annotations Annotations
+
+		// Polymorphic edge support
+		IsPolymorphic          bool    // whether this is a polymorphic edge.
+		AllowedTypes           []*Type // types this polymorphic edge can reference.
+		TypeDiscriminatorField string  // field storing the entity type discriminator.
+
+		// PropertyGraph holds property graph specific information for this edge.
+		PropertyGraph struct {
+			// Labels holds multiple labels that can be applied to this edge in property graphs.
+			Labels []PropertyGraphLabel
+		}
 	}
 
 	// Relation holds the relational database information for edges.
@@ -160,6 +180,10 @@ type (
 		Columns []string
 		// foreign-key information for non-M2M edges.
 		fk *ForeignKey
+
+		// Polymorphic relation support
+		TypeColumn   string   // column storing the entity type discriminator (for polymorphic edges).
+		AllowedTypes []string // types this polymorphic edge can reference.
 	}
 
 	// Index represents a database index used for either increasing speed
@@ -204,6 +228,69 @@ type (
 		// Value in the schema.
 		Value string
 	}
+
+	// PropertyGraphLabel represents a label definition for property graphs.
+	PropertyGraphLabel struct {
+		// Name is the label name.
+		Name string
+		// IsDefault indicates if this is the default label for the type.
+		IsDefault bool
+		// Properties defines which properties are exposed by this label.
+		Properties PropertyGraphProperties
+	}
+
+	// PropertyGraphProperties defines which properties are included for a label or element.
+	PropertyGraphProperties struct {
+		// Type indicates the type of property definition.
+		Type PropertyGraphPropertiesType
+		// AllColumns indicates to include all columns as properties.
+		AllColumns bool
+		// ExcludedColumns lists columns to exclude when AllColumns is true.
+		ExcludedColumns []string
+		// SpecificColumns lists specific columns to include as properties.
+		SpecificColumns []string
+		// DerivedProperties lists derived/computed properties.
+		DerivedProperties []PropertyGraphDerivedProperty
+	}
+
+	// PropertyGraphPropertiesType represents the type of property definition.
+	PropertyGraphPropertiesType int
+
+	// PropertyGraphDerivedProperty represents a derived/computed property.
+	PropertyGraphDerivedProperty struct {
+		// Expression is the value expression for the property.
+		Expression string
+		// Alias is the optional alias for the property.
+		Alias string
+	}
+
+	// TODO: Add support for advanced Spanner property graph features
+	// Based on: https://cloud.google.com/spanner/docs/reference/standard-sql/graph-schema-statements
+
+	// PropertyGraphElementKey represents custom element key definitions beyond primary keys.
+	// TODO: Implement support for KEY (column1, column2) syntax in property graph elements.
+	PropertyGraphElementKey struct {
+		// Columns defines the custom key columns for this element.
+		Columns []string
+	}
+
+	// PropertyGraphReferenceKey represents SOURCE KEY and DESTINATION KEY definitions for edges.
+	// TODO: Implement advanced reference key patterns with custom column mappings.
+	PropertyGraphReferenceKey struct {
+		// EdgeColumns are the columns in the edge table.
+		EdgeColumns []string
+		// ReferencedColumns are the columns in the referenced node table.
+		// If empty, uses the element key of the referenced node.
+		ReferencedColumns []string
+	}
+)
+
+// PropertyGraphPropertiesType constants.
+const (
+	PropertyGraphPropertiesNone PropertyGraphPropertiesType = iota
+	PropertyGraphPropertiesAll
+	PropertyGraphPropertiesSpecific
+	PropertyGraphPropertiesDerived
 )
 
 // NewType creates a new type and its fields from the given schema.
@@ -706,10 +793,11 @@ func (t *Type) setupFKs() error {
 		if err := e.setStorageKey(); err != nil {
 			return fmt.Errorf("%q edge: %w", e.Name, err)
 		}
-		if ef := e.def.Field; ef != "" && !e.OwnFK() {
+		// Skip foreign key validation for polymorphic edges since they use regular fields
+		if ef := e.def.Field; ef != "" && !e.OwnFK() && !e.IsPolymorphic {
 			return fmt.Errorf("edge %q has a field %q but it is not holding a foreign key", e.Name, ef)
 		}
-		if e.IsInverse() || e.M2M() {
+		if e.IsInverse() || e.M2M() || e.IsPolymorphic {
 			continue
 		}
 		owner, refid := t, e.Type.ID
@@ -998,6 +1086,11 @@ func (t Type) RelatedTypes() []*Type {
 		}
 	}
 	return related
+}
+
+// PropertyGraphAlias returns the alias for this type when used in property graphs.
+func (t Type) PropertyGraphAlias() string {
+	return t.Table() // Default to table name
 }
 
 // ValidSchemaName will determine if a name is going to conflict with any
@@ -1522,7 +1615,7 @@ func (f Field) ScanTypeField(rec string) string {
 	case field.TypeEnum:
 		expr = fmt.Sprintf("%s(%s.String)", f.Type, rec)
 	case field.TypeString, field.TypeBool, field.TypeInt64, field.TypeFloat64:
-		expr = f.goType(fmt.Sprintf("%s.%s", rec, strings.Title(f.Type.Type.String())))
+		expr = f.goType(fmt.Sprintf("%s.%s", rec, strings.ToUpper(f.Type.Type.String()[:1])+f.Type.Type.String()[1:]))
 	case field.TypeTime:
 		expr = fmt.Sprintf("%s.Time", rec)
 	case field.TypeFloat32:
@@ -1883,6 +1976,9 @@ func (f *Field) Ops() []Op {
 // Label returns the Gremlin label name of the edge.
 // If the edge is inverse
 func (e Edge) Label() string {
+	if ant := edgeAnnotate(e.Annotations); ant != nil && ant.Label != "" {
+		return ant.Label
+	}
 	if e.IsInverse() {
 		return fmt.Sprintf("%s_%s", e.Owner.Label(), snake(e.Inverse))
 	}
@@ -2159,6 +2255,17 @@ func (e Edge) Index() (int, error) {
 	return 0, fmt.Errorf("edge %q was not found in its owner schema %q", e.Name, e.Owner.Name)
 }
 
+// PropertyGraphAlias returns the alias for this edge when used in property graphs.
+// TODO: Implement edge aliasing for Spanner property graphs.
+func (e Edge) PropertyGraphAlias() string {
+	return e.Name // Default to edge name
+}
+
+// PropertyGraphLabels returns multiple labels that can be applied to this edge.
+func (e Edge) PropertyGraphLabels() []PropertyGraphLabel {
+	return e.PropertyGraph.Labels
+}
+
 // Column returns the first element from the columns slice.
 func (r Relation) Column() string {
 	if len(r.Columns) == 0 {
@@ -2180,11 +2287,12 @@ type Rel int
 
 // Relation types.
 const (
-	Unk Rel = iota // Unknown.
-	O2O            // One to one / has one.
-	O2M            // One to many / has many.
-	M2O            // Many to one (inverse perspective for O2M).
-	M2M            // Many to many.
+	Unk         Rel = iota // Unknown.
+	O2O                    // One to one / has one.
+	O2M                    // One to many / has many.
+	M2O                    // Many to one (inverse perspective for O2M).
+	M2M                    // Many to many.
+	Polymorphic            // Polymorphic / can point to multiple types.
 )
 
 // String returns the relation name.
@@ -2199,6 +2307,8 @@ func (r Rel) String() string {
 		s = "M2O"
 	case M2M:
 		s = "M2M"
+	case Polymorphic:
+		s = "Polymorphic"
 	}
 	return s
 }
@@ -2252,6 +2362,18 @@ func sqlAnnotate(annotation map[string]any) *entsql.Annotation {
 // sqlIndexAnnotate extracts the entsql annotation from a loaded annotation format.
 func sqlIndexAnnotate(annotation map[string]any) *entsql.IndexAnnotation {
 	annotate := &entsql.IndexAnnotation{}
+	if annotation == nil || annotation[annotate.Name()] == nil {
+		return nil
+	}
+	if buf, err := json.Marshal(annotation[annotate.Name()]); err == nil {
+		_ = json.Unmarshal(buf, &annotate)
+	}
+	return annotate
+}
+
+// edgeAnnotate extracts the edge annotation from a loaded annotation format.
+func edgeAnnotate(annotation map[string]any) *edge.Annotation {
+	annotate := &edge.Annotation{}
 	if annotation == nil || annotation[annotate.Name()] == nil {
 		return nil
 	}

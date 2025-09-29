@@ -26,6 +26,11 @@ type Descriptor struct {
 	StorageKey  *StorageKey            // optional storage-key configuration.
 	Annotations []schema.Annotation    // edge annotations.
 	Comment     string                 // edge comment.
+
+	// Polymorphic edge support
+	AllowedTypes           []string // types this polymorphic edge can reference.
+	TypeDiscriminatorField string   // field name for the polymorphic type discriminator.
+	IsPolymorphic          bool     // whether this is a polymorphic edge.
 }
 
 // To defines an association edge between two vertices.
@@ -219,6 +224,88 @@ func (b *inverseBuilder) Annotations(annotations ...schema.Annotation) *inverseB
 
 // Descriptor implements the ent.Descriptor interface.
 func (b *inverseBuilder) Descriptor() *Descriptor {
+	return b.desc
+}
+
+// polymorphicAssocBuilder is the builder for polymorphic association edges.
+type polymorphicAssocBuilder struct {
+	desc *Descriptor
+}
+
+// PolyTo creates a polymorphic association edge that can connect to multiple target types.
+//
+//	edge.PolyTo("entity", Media.Type, MediaEpisode.Type, Trailer.Type).
+//		TypeField("entity_type").
+//		Field("entity_nid").
+//		Required()
+func PolyTo(name string, allowedTypes ...any) *polymorphicAssocBuilder {
+	typeNames := make([]string, len(allowedTypes))
+	for i, t := range allowedTypes {
+		typeNames[i] = typ(t)
+	}
+
+	return &polymorphicAssocBuilder{
+		desc: &Descriptor{
+			Name:          name,
+			Type:          "polymorphic", // Special type marker
+			AllowedTypes:  typeNames,
+			IsPolymorphic: true,
+		},
+	}
+}
+
+// TypeField specifies the field that stores the entity type discriminator.
+// This field should be a string field in your schema.
+func (b *polymorphicAssocBuilder) TypeField(field string) *polymorphicAssocBuilder {
+	b.desc.TypeDiscriminatorField = field
+	return b
+}
+
+// Field specifies the field that stores the polymorphic foreign key.
+// This field should match the ID type of your target entities.
+func (b *polymorphicAssocBuilder) Field(field string) *polymorphicAssocBuilder {
+	b.desc.Field = field
+	return b
+}
+
+// Required indicates that this edge is a required field on creation.
+func (b *polymorphicAssocBuilder) Required() *polymorphicAssocBuilder {
+	b.desc.Required = true
+	return b
+}
+
+// Unique indicates that this edge is unique (creates a unique constraint).
+func (b *polymorphicAssocBuilder) Unique() *polymorphicAssocBuilder {
+	b.desc.Unique = true
+	return b
+}
+
+// Immutable indicates that this edge cannot be updated.
+func (b *polymorphicAssocBuilder) Immutable() *polymorphicAssocBuilder {
+	b.desc.Immutable = true
+	return b
+}
+
+// StructTag sets the struct tag of the polymorphic edge.
+func (b *polymorphicAssocBuilder) StructTag(s string) *polymorphicAssocBuilder {
+	b.desc.Tag = s
+	return b
+}
+
+// Annotate adds annotations to the polymorphic edge.
+func (b *polymorphicAssocBuilder) Annotate(annotations ...schema.Annotation) *polymorphicAssocBuilder {
+	b.desc.Annotations = append(b.desc.Annotations, annotations...)
+	return b
+}
+
+// Comment sets the comment of the polymorphic edge.
+func (b *polymorphicAssocBuilder) Comment(comment string) *polymorphicAssocBuilder {
+	b.desc.Comment = comment
+	return b
+}
+
+// Descriptor returns the edge descriptor.
+func (b *polymorphicAssocBuilder) Descriptor() *Descriptor {
 	return b.desc
 }
 

@@ -20,6 +20,7 @@ import (
 	"strings"
 	"text/template/parse"
 
+	gqlschema "entgo.io/ent/dialect/gql/schema"
 	"entgo.io/ent/dialect/sql/schema"
 	"entgo.io/ent/entc/load"
 	"entgo.io/ent/schema/field"
@@ -318,13 +319,52 @@ func (g *Graph) addEdges(schema *load.Schema) {
 	t, _ := g.typ(schema.Name)
 	seen := make(map[string]struct{}, len(schema.Edges))
 	for _, e := range schema.Edges {
-		typ, ok := g.typ(e.Type)
-		expect(ok, "type %q does not exist for edge", e.Type)
-		_, ok = t.fields[e.Name]
+		_, ok := t.fields[e.Name]
 		expect(!ok, "%s schema cannot contain field and edge with the same name %q", schema.Name, e.Name)
 		_, ok = seen[e.Name]
 		expect(!ok, "%s schema contains multiple %q edges", schema.Name, e.Name)
 		seen[e.Name] = struct{}{}
+
+		// Handle polymorphic edges
+		if e.IsPolymorphic {
+			expect(e.TypeDiscriminatorField != "", "polymorphic edge %s.%s is missing TypeField", t.Name, e.Name)
+			expect(e.Field != "", "polymorphic edge %s.%s is missing Field", t.Name, e.Name)
+			expect(len(e.AllowedTypes) > 0, "polymorphic edge %s.%s must specify at least one target type", t.Name, e.Name)
+
+			// Resolve polymorphic target types to actual Type instances
+			var allowedTypes []*Type
+			for _, targetTypeName := range e.AllowedTypes {
+				targetType, ok := g.typ(targetTypeName)
+				expect(ok, "polymorphic target type %q does not exist for edge %s.%s", targetTypeName, t.Name, e.Name)
+				allowedTypes = append(allowedTypes, targetType)
+			}
+
+			t.Edges = append(t.Edges, &Edge{
+				def:                    e,
+				Type:                   nil, // Polymorphic edges don't have a single target type
+				Name:                   e.Name,
+				Owner:                  t,
+				Unique:                 true, // Polymorphic edges are conceptually unique (one FK per entity)
+				Optional:               !e.Required,
+				Immutable:              e.Immutable,
+				StructTag:              structTag(e.Name, e.Tag),
+				Annotations:            e.Annotations,
+				IsPolymorphic:          true,
+				AllowedTypes:           allowedTypes,
+				TypeDiscriminatorField: e.TypeDiscriminatorField,
+				Rel: Relation{
+					Type:         Polymorphic,
+					Table:        t.Table(),
+					Columns:      []string{e.Field},
+					TypeColumn:   e.TypeDiscriminatorField,
+					AllowedTypes: e.AllowedTypes,
+				},
+			})
+			continue
+		}
+
+		typ, ok := g.typ(e.Type)
+		expect(ok, "type %q does not exist for edge", e.Type)
 		switch {
 		// Assoc only.
 		case !e.Inverse:
@@ -693,6 +733,30 @@ func (g *Graph) Tables() (all []*schema.Table, err error) {
 					RefColumns: []*schema.Column{ref.PrimaryKey[0]},
 					Symbol:     fkSymbol(e, owner, ref),
 				})
+			case Polymorphic:
+				// Polymorphic relationships are managed using a single foreign key column
+				// and a type discriminator column. It does not create a foreign key constraint
+				// to enforce referential integrity. However, if the edge is marked as Unique(),
+				// we create a unique constraint on the (foreign_key, type_discriminator) pair.
+				if e.Unique {
+					owner := tables[e.Rel.Table]
+					// Find the foreign key column and type discriminator column.
+					var fkColumn, typeColumn *schema.Column
+					for _, col := range owner.Columns {
+						if col.Name == e.Rel.Columns[0] {
+							fkColumn = col
+						}
+						if col.Name == e.Rel.TypeColumn {
+							typeColumn = col
+						}
+					}
+					if fkColumn != nil && typeColumn != nil {
+						// Create unique constraint on (foreign_key, type_discriminator).
+						indexName := fmt.Sprintf("%s_%s_%s_unique", owner.Name, fkColumn.Name, typeColumn.Name)
+						columnNames := []string{fkColumn.Name, typeColumn.Name}
+						owner.AddIndex(indexName, true, columnNames)
+					}
+				}
 			case M2O:
 				ref, owner := tables[e.Type.Table()], tables[e.Rel.Table]
 				column := fkColumn(e, owner, ref.PrimaryKey[0])
@@ -811,6 +875,238 @@ func (g *Graph) Views() (views []*schema.Table, err error) {
 		views = append(views, view)
 	}
 	return
+}
+
+// PropertyGraphs returns the schema definition of a property graph for the graph.
+func (g *Graph) PropertyGraphs() (pgs []*gqlschema.PropertyGraph, err error) {
+	// Create a property graph for the entire schema if there are nodes
+	if len(g.Nodes) == 0 {
+		return nil, nil
+	}
+
+	// Create a property graph with a default name
+	graphName := "DefaultGraph"
+	pg := gqlschema.NewPropertyGraph(graphName)
+
+	// Add node tables for all mutable nodes (exclude views and edge schemas)
+	for _, n := range g.Nodes {
+		// Skip views as they are not supported by property graphs
+		if n.IsView() {
+			continue
+		}
+
+		// Skip edge schemas that should be represented as edge tables
+		if n.IsEdgeSchema() {
+			continue
+		}
+
+		if err := addPGNodeElement(pg, n); err != nil {
+			return nil, fmt.Errorf("adding node table %s: %w", n.Name, err)
+		}
+
+		for _, e := range n.Edges {
+			// Skip views as they are not supported by property graphs
+			if e.Type != nil && e.Type.IsView() {
+				continue
+			}
+
+			// Skip intermediary edge schemas
+			if e.Type != nil && e.Type.IsEdgeSchema() || (e.def != nil && e.def.Name == "" && e.Name != "") {
+				continue
+			}
+
+			if err := addPGEdgeElement(pg, n, e); err != nil {
+				return nil, fmt.Errorf("adding edge table for %s.%s: %w", n.Name, e.Name, err)
+			}
+		}
+	}
+
+	return []*gqlschema.PropertyGraph{pg}, nil
+}
+
+// addPGNodeElement adds a node representation to the property graph.
+func addPGNodeElement(pg *gqlschema.PropertyGraph, n *Type) error {
+	if n.Table() == "" {
+		return fmt.Errorf("node %s has empty table name", n.Name)
+	}
+
+	// Use table name for property graph DDL
+	nodeTable := gqlschema.NewNodeTable(n.Table())
+
+	// Set element key based on the node's ID configuration
+	if err := setNodeKeys(nodeTable, n); err != nil {
+		return fmt.Errorf("setting keys for node %s: %w", n.Name, err)
+	}
+
+	// Add a default label with all properties
+	// TODO: Customize properties based on requirements
+	label := gqlschema.NewDefaultLabel().SetProperties(gqlschema.NewAllProperties())
+	nodeTable.AddLabel(label)
+
+	pg.AddNodeTable(nodeTable)
+	return nil
+}
+
+// addPGEdgeElement adds appropriate edge representation to the property graph.
+func addPGEdgeElement(pg *gqlschema.PropertyGraph, n *Type, e *Edge) error {
+	// Polymorphic edges are handled differently, because they create multiple edge tables.
+	if e.Rel.Type == Polymorphic {
+		// For each target type, create a separate edge table.
+		for _, targetType := range e.AllowedTypes {
+			if targetType.IsView() {
+				continue
+			}
+			// Create unique edge table name for this type combination.
+			edgeTableName := fmt.Sprintf("%s_%s_%s", n.Table(), e.Name, targetType.Table())
+			// Create edge table.
+			edgeTable := gqlschema.NewEdgeTable(edgeTableName)
+			if len(e.Rel.Columns) == 0 {
+				return fmt.Errorf("polymorphic edge %s.%s has no columns", n.Name, e.Name)
+			}
+			edgeTable.SetKey(gqlschema.NewElementKey(e.Rel.Columns[0]))
+			edgeTable.SetSourceKey(gqlschema.NewReferenceKey(
+				[]string{n.ID.Column().Name},
+				n.Table(),
+				[]string{n.ID.Column().Name},
+			))
+			edgeTable.SetDestinationKey(gqlschema.NewReferenceKey(
+				[]string{e.Rel.Columns[0]}, // The polymorphic foreign key field.
+				targetType.Table(),
+				[]string{targetType.ID.Column().Name},
+			))
+			pg.AddEdgeTable(edgeTable)
+		}
+		return nil
+	}
+
+	// Regular edges (non-polymorphic, non-edge-schema)
+	edgeTable := gqlschema.NewEdgeTable(e.Rel.Table).SetAlias(e.Label())
+	// TODO: Customize labels based on requirements
+	edgeTable.AddLabel(gqlschema.NewDefaultLabel().SetProperties(gqlschema.NewAllProperties()))
+
+	// Set source and destination keys based on the edge relationship
+	if err := setEdgeKeys(edgeTable, n, e); err != nil {
+		return err
+	}
+	pg.AddEdgeTable(edgeTable)
+	return nil
+}
+
+// setNodeKeys sets the primary key for a node based on its ID configuration.
+func setNodeKeys(nodeTable *gqlschema.NodeTable, n *Type) error {
+	if n.HasOneFieldID() {
+		// Single field ID
+		if n.ID.Column() == nil {
+			return fmt.Errorf("node %s ID field has no column", n.Name)
+		}
+		nodeTable.SetKey(gqlschema.NewElementKey(n.ID.Column().Name))
+	} else if n.HasCompositeID() {
+		// Composite ID from edge schema
+		var keyColumns []string
+		for _, idField := range n.EdgeSchema.ID {
+			if idField.Column() == nil {
+				return fmt.Errorf("node %s composite ID field %s has no column", n.Name, idField.Name)
+			}
+			keyColumns = append(keyColumns, idField.Column().Name)
+		}
+		if len(keyColumns) > 0 {
+			nodeTable.SetKey(gqlschema.NewElementKey(keyColumns...))
+		}
+	} else {
+		// No identifiable primary key
+		var idFields []string
+		for _, f := range n.Fields {
+			if f.Column().PrimaryKey() {
+				idFields = append(idFields, f.Column().Name)
+			}
+		}
+		if len(idFields) > 0 {
+			nodeTable.SetKey(gqlschema.NewElementKey(idFields...))
+		} else {
+			// No primary key found
+			return fmt.Errorf("node %s has no identifiable primary key", n.Name)
+		}
+	}
+	return nil
+}
+
+// setEdgeKeys sets the source and destination keys for an edge based on its relationship type.
+func setEdgeKeys(edgeTable *gqlschema.EdgeTable, n *Type, e *Edge) error {
+	var srcRefCols []string
+	if n.HasCompositeID() {
+		for _, idf := range n.EdgeSchema.ID {
+			srcRefCols = append(srcRefCols, idf.Column().Name)
+		}
+	} else if n.HasOneFieldID() {
+		srcRefCols = append(srcRefCols, n.ID.Column().Name)
+	} else {
+		return fmt.Errorf("source type %s for edge %s.%s has no identifiable primary key", n.Name, n.Name, e.Name)
+	}
+
+	var dstRefCols []string
+	if e.Type.HasCompositeID() {
+		for _, idf := range e.Type.EdgeSchema.ID {
+			dstRefCols = append(dstRefCols, idf.Column().Name)
+		}
+	} else if e.Type.HasOneFieldID() {
+		dstRefCols = append(dstRefCols, e.Type.ID.Column().Name)
+	} else if e.Type != nil {
+		return fmt.Errorf("destination type %s for edge %s.%s has no identifiable primary key", e.Type.Name, n.Name, e.Name)
+	}
+
+	var src, dst *gqlschema.ReferenceKey
+	switch e.Rel.Type {
+	case O2O, O2M, M2O:
+		if len(e.Rel.Columns) != 1 {
+			return fmt.Errorf("%s edge %s.%s must have exactly one column, got %d", e.Rel.Type, n.Name, e.Name, len(e.Rel.Columns))
+		}
+		edgeTable.SetKey(gqlschema.NewElementKey(e.Rel.Columns[0]))
+		if e.Rel.Type == M2O {
+			src = gqlschema.NewReferenceKey(
+				srcRefCols,
+				n.Table(),
+				srcRefCols,
+			)
+			dst = gqlschema.NewReferenceKey(
+				[]string{e.Rel.Columns[0]},
+				e.Type.Table(),
+				dstRefCols,
+			)
+		} else { // O2O, O2M
+			src = gqlschema.NewReferenceKey(
+				[]string{e.Rel.Columns[0]},
+				n.Table(),
+				srcRefCols,
+			)
+			dst = gqlschema.NewReferenceKey(
+				srcRefCols,
+				e.Type.Table(),
+				dstRefCols,
+			)
+		}
+	case M2M:
+		if len(e.Rel.Columns) < 2 {
+			return fmt.Errorf("insufficient columns for M2M relationship")
+		}
+		edgeTable.SetKey(gqlschema.NewElementKey(e.Rel.Columns...))
+		sourceColumns := []string{e.Rel.Columns[0]}
+		src = gqlschema.NewReferenceKey(
+			sourceColumns,
+			n.Table(),
+			srcRefCols,
+		)
+		destColumns := []string{e.Rel.Columns[1]}
+		dst = gqlschema.NewReferenceKey(
+			destColumns,
+			e.Type.Table(),
+			dstRefCols,
+		)
+	default:
+		return fmt.Errorf("unsupported relation type %v for edge %s.%s", e.Rel.Type, n.Name, e.Name)
+	}
+	edgeTable.SetSourceKey(src)
+	edgeTable.SetDestinationKey(dst)
+	return nil
 }
 
 // mayAddColumn adds the given column if it does not already exist in the table.

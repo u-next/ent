@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"entgo.io/ent/dialect/gql"
 	"entgo.io/ent/dialect/gremlin/graph/dsl"
 	"entgo.io/ent/dialect/sql"
 )
@@ -112,6 +113,20 @@ var drivers = []*Storage{
 		OpCode:     opCodes(gremlinCode[:]),
 		Init:       func(*Graph) error { return nil }, // Noop.
 	},
+	{
+		Name:      "gql",
+		IdentName: "GQL",
+		Builder:   reflect.TypeOf(&gql.GraphQuery{}),
+		Dialects:  []string{"dialect.Spanner"},
+		// TODO: add imports for gql codegen.
+		Imports: []string{
+			"entgo.io/ent/dialect/gql",
+			"entgo.io/ent/dialect/gql/schema",
+		},
+		SchemaMode: Unique | Migrate,
+		OpCode:     opCodes(gqlCode[:]),
+		Init:       func(*Graph) error { return nil }, // Noop.
+	},
 }
 
 // NewStorage returns the storage driver type from the given string.
@@ -145,6 +160,9 @@ var (
 		HasPrefix: "StartingWith",
 		HasSuffix: "EndingWith",
 	}
+	// TODO: implement GQL operation codes
+	// exceptional operation names in gql.
+	gqlCode = [...]string{}
 )
 
 func opCodes(codes []string) func(Op) string {

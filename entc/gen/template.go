@@ -182,6 +182,7 @@ var (
 		"dialect/*/config/*/*",
 		"dialect/*/import/additional/*",
 		"dialect/*/query/selector/*",
+		"dialect/*/migrate/schema/*",
 		"dialect/sql/create/additional/*",
 		"dialect/sql/create_bulk/additional/*",
 		"dialect/sql/meta/constants/*",

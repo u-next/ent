@@ -17,6 +17,25 @@ type Annotation struct {
 	//	}
 	//
 	StructTag string
+
+	// The Label option allows overriding the edge label
+	// in the graph database. For example:
+	//
+	//	edge.Annotation{
+	//		Label: "follows",
+	//	}
+	//
+	Label string
+
+	// The Properties option allows configuring the edge properties
+	// that should be loaded when querying the edge. For example:
+	//
+	//	edge.Annotation{
+	//		Properties: []string{"created_at", "updated_at"},
+	//	}
+	//
+	// If empty, all edge properties are loaded.
+	Properties []string
 }
 
 // Name describes the annotation name.
@@ -39,6 +58,9 @@ func (a Annotation) Merge(other schema.Annotation) schema.Annotation {
 	}
 	if tag := ant.StructTag; tag != "" {
 		a.StructTag = tag
+	}
+	if label := ant.Label; label != "" {
+		a.Label = label
 	}
 	return a
 }

@@ -159,6 +159,22 @@ var (
 		},
 	}
 
+	// TODO: implement the GQL in SQL feature.
+	FeatureGQLCompat = Feature{
+		Name:        "sql/gqlcompat",
+		Stage:       Experimental,
+		Default:     false,
+		Description: "Allows users to embed GQL queries inside SQL queries using the GRAPH_TABLE operator",
+	}
+
+	// TODO: implement the full-text search feature.
+	FeatureFullTextSearch = Feature{
+		Name:        "sql/fulltextsearch",
+		Stage:       Experimental,
+		Default:     false,
+		Description: "Allows users to define full-text search indexes on text columns",
+	}
+
 	// AllFeatures holds a list of all feature-flags.
 	AllFeatures = []Feature{
 		FeaturePrivacy,
@@ -174,6 +190,8 @@ var (
 		FeatureUpsert,
 		FeatureVersionedMigration,
 		FeatureGlobalID,
+		FeatureGQLCompat,
+		FeatureFullTextSearch,
 	}
 	// allFeatures includes all public and private features.
 	allFeatures = append(AllFeatures, featureMultiSchema)

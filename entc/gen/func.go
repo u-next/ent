@@ -75,6 +75,7 @@ var (
 		"fail":          fail,
 		"replace":       strings.ReplaceAll,
 		"allZero":       allZero,
+		"propertyGraph": propertyGraphs,
 	}
 	rules    = ruleset()
 	acronyms = make(map[string]struct{})
@@ -550,4 +551,16 @@ func allZero(v ...any) bool {
 		}
 	}
 	return true
+}
+
+// propertyGraphs safely calls the PropertyGraph method on a Graph and returns nil if there's an error.
+func propertyGraphs(g *Graph) any {
+	if g == nil {
+		return nil
+	}
+	pg, err := g.PropertyGraphs()
+	if err != nil {
+		return nil
+	}
+	return pg
 }
