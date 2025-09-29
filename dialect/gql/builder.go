@@ -41,7 +41,7 @@ type Statement interface {
 type GraphQuery struct {
 	Builder
 	graph string      // property graph name
-	qs    []Statement // linear query statements
+	stmts []Statement // linear query statements
 }
 
 // Graph returns a new GraphQuery for the GRAPH statement.
@@ -59,7 +59,7 @@ func (g *GraphQuery) Graph(name string) *GraphQuery {
 
 // Append adds a linear query statement to the multi-linear query.
 func (g *GraphQuery) Append(stmt Statement) *GraphQuery {
-	g.qs = append(g.qs, stmt)
+	g.stmts = append(g.stmts, stmt)
 	return g
 }
 
@@ -195,7 +195,7 @@ func (g *GraphQuery) Query() (string, []any) {
 		g.WriteString("GRAPH ").Ident(g.graph).NewLine()
 	}
 
-	for i, stmt := range g.qs {
+	for i, stmt := range g.stmts {
 		if i > 0 {
 			g.NewLine()
 		}
@@ -210,7 +210,7 @@ func (g *GraphQuery) Clone() *GraphQuery {
 	return &GraphQuery{
 		Builder: g.Builder.clone(),
 		graph:   g.graph,
-		qs:      g.qs,
+		stmts:   g.stmts,
 	}
 }
 
@@ -867,57 +867,75 @@ func ExceptDistinct() SetOperation {
 	}
 }
 
-// GraphTableBuilder is a builder for GRAPH_TABLE operator in SQL queries.
-type GraphTableBuilder struct {
-	Builder
-	graphName string
-	query     Querier
-	alias     string
+// Queries are list of queries join with space between them.
+type Queries []Querier
+
+// Query returns query representation of Queriers.
+func (n Queries) Query() (string, []any) {
+	b := &Builder{}
+	for i := range n {
+		if i > 0 {
+			b.Pad()
+		}
+		query, args := n[i].Query()
+		b.WriteString(query)
+		b.args = append(b.args, args...)
+	}
+	return b.String(), b.args
+}
+
+// GraphTableWrapper is a builder for GRAPH_TABLE operator in SQL queries.
+type GraphTableWrapper struct {
+	*GraphQuery
+	sql.TableView
+	alias string
 }
 
 // GraphTable creates a new GRAPH_TABLE operator builder.
-func GraphTable() *GraphTableBuilder {
-	return &GraphTableBuilder{}
-}
-
-// Graph sets the property graph name.
-func (g *GraphTableBuilder) Graph(name string) *GraphTableBuilder {
-	g.graphName = name
-	return g
-}
-
-// Statement sets the multi-linear query statement.
-func (g *GraphTableBuilder) Statement(query Querier) *GraphTableBuilder {
-	g.query = query
-	return g
+func GraphTable(q *GraphQuery) *GraphTableWrapper {
+	return &GraphTableWrapper{
+		GraphQuery: q,
+	}
 }
 
 // As sets the alias for the table.
-func (g *GraphTableBuilder) As(alias string) *GraphTableBuilder {
+func (g *GraphTableWrapper) As(alias string) *GraphTableWrapper {
 	g.alias = alias
 	return g
 }
 
 // Query returns the GRAPH_TABLE operator representation.
-func (g *GraphTableBuilder) Query() (string, []any) {
-	g.WriteString("GRAPH_TABLE(")
+func (g *GraphTableWrapper) Query() (string, []any) {
+	g.WriteString("GRAPH_TABLE").Wrap(func(b *Builder) {
+		if g.graph != "" {
+			b.NewLine().Indent(1).Ident(g.graph).NewLine()
+		}
 
-	if g.graphName != "" {
-		g.Ident(g.graphName)
-	}
-
-	if g.query != nil {
-		g.NewLine()
-		g.Join(g.query)
-	}
-
-	g.NewLine().WriteByte(')')
+		for i, stmt := range g.stmts {
+			query, args := stmt.Query()
+			b.Indent(1).WriteString(query)
+			b.args = append(b.args, args...)
+			if i >= 0 {
+				b.NewLine()
+			}
+		}
+	})
 
 	if g.alias != "" {
-		g.WriteString(" AS ").Ident(g.alias)
+		g.Pad().WriteString("AS").Pad().Ident(g.alias)
 	}
 
 	return g.String(), g.args
+}
+
+func (g *GraphTableWrapper) C(column string) string {
+	if g.isQualified(column) {
+		return column
+	}
+	name := g.alias
+	b := &Builder{}
+	b.Ident(name).WriteByte('.').Ident(column)
+	return b.String()
 }
 
 // Builder is the base query builder for the GQL language.
@@ -1329,6 +1347,14 @@ func (b *Builder) NewLine() *Builder {
 // Colon adds a colon character.
 func (b *Builder) Colon() *Builder {
 	return b.WriteByte(':')
+}
+
+// Indent adds an indentation (tab character).
+func (b *Builder) Indent(depth int) *Builder {
+	for range depth {
+		b.WriteByte('\t')
+	}
+	return b
 }
 
 // Helper functions for identifier checking

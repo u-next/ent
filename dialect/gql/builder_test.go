@@ -228,6 +228,21 @@ MATCH (p:Person {id: ?})-[:Owns]->(a:Account)
 MATCH @{JOIN_METHOD=APPLY_JOIN} (a:Account)-[e:Transfers]->(oa:Account)
 RETURN oa.id`,
 		},
+		{
+			input: GraphTable(Graph("FinGraph").
+				Match(
+					Node().Variable("n").Labels("Person"),
+				).
+				Return(
+					Column("n.name"),
+				),
+			).As("PersonNames"),
+			wantQuery: "GRAPH_TABLE(" + `
+	` + "`FinGraph`" + `
+	MATCH (n:Person)
+	RETURN n.name
+) AS ` + "`PersonNames`",
+		},
 	}
 
 	for i, tt := range tests {
