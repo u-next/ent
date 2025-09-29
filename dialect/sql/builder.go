@@ -1676,6 +1676,7 @@ type Selector struct {
 	// ctx stores contextual data typically from
 	// generated code such as alternate table schemas.
 	ctx       context.Context
+	typ       string
 	as        string
 	selection []selection
 	from      []TableView
@@ -1806,6 +1807,33 @@ func (s *Selector) AppendSelectExprAs(expr Querier, as string) *Selector {
 		x:  x,
 		as: as,
 	})
+	return s
+}
+
+func (s *Selector) AsStruct() *Selector {
+	if !s.spanner() {
+		s.AddError(fmt.Errorf("AS STRUCT is only supported by GoogleSQL family dialects"))
+		return s
+	}
+	s.typ = "STRUCT"
+	return s
+}
+
+func (s *Selector) AsValue() *Selector {
+	if !s.spanner() {
+		s.AddError(fmt.Errorf("AS VALUE is only supported by GoogleSQL family dialects"))
+		return s
+	}
+	s.typ = "VALUE"
+	return s
+}
+
+func (s *Selector) AsType(typ string) *Selector {
+	if !s.spanner() {
+		s.AddError(fmt.Errorf("AS TYPE is only supported by GoogleSQL family dialects"))
+		return s
+	}
+	s.typ = typ
 	return s
 }
 
@@ -2498,6 +2526,16 @@ func (s *Selector) Query() (string, []any) {
 	b.WriteString("SELECT ")
 	if s.distinct {
 		b.WriteString("DISTINCT ")
+	}
+	if s.typ != "" {
+		b.WriteString("AS ")
+		switch s.typ {
+		case "STRUCT", "VALUE":
+			b.WriteString(s.typ)
+		default:
+			b.Ident(s.typ)
+		}
+		b.Pad()
 	}
 	if len(s.selection) > 0 {
 		s.joinSelect(&b)
@@ -3332,6 +3370,16 @@ func (b Builder) postgres() bool {
 // sqlite reports if the builder dialect is SQLite.
 func (b Builder) sqlite() bool {
 	return b.Dialect() == dialect.SQLite
+}
+
+// mysql reports if the builder dialect is MySQL.
+func (b Builder) mysql() bool {
+	return b.Dialect() == dialect.MySQL
+}
+
+// spanner reports if the builder dialect is Spanner.
+func (b Builder) spanner() bool {
+	return b.Dialect() == dialect.Spanner
 }
 
 // fromIdent sets the builder dialect from the identifier format.

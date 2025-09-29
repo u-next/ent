@@ -1570,6 +1570,61 @@ func TestSelector_SelectExpr(t *testing.T) {
 	require.Equal(t, []any{1, "A", "D", 10}, args)
 }
 
+func TestSelector_SelectAs(t *testing.T) {
+	query, args := Dialect(dialect.Spanner).
+		SelectExpr(
+			ExprFunc(func(b *Builder) {
+				b.WriteString("ARRAY")
+				b.Wrap(func(b *Builder) {
+					b.Join(Dialect(dialect.Spanner).
+						Select().
+						AsStruct().
+						AppendSelectExprAs(Expr("?", 1), "a").
+						AppendSelectExprAs(Expr("?", 2), "b"),
+					)
+				})
+			}),
+		).
+		Query()
+	require.Equal(t, "SELECT ARRAY(SELECT AS STRUCT (?) AS `a`, (?) AS `b`)", query)
+	require.Equal(t, []any{1, 2}, args)
+
+	query, args = Dialect(dialect.Spanner).
+		Select().
+		AsValue().
+		AppendSelectExpr(
+			ExprFunc(func(b *Builder) {
+				b.WriteString("STRUCT")
+				b.Wrap(func(b *Builder) {
+					b.JoinComma(Expr("? AS x", 1), Expr("?", 2), Expr("?", 3))
+				})
+			}),
+		).
+		Query()
+	require.Equal(t, "SELECT AS VALUE STRUCT(? AS x, ?, ?)", query)
+	require.Equal(t, []any{1, 2, 3}, args)
+
+	query, args = Dialect(dialect.Spanner).
+		Select().
+		AsType("tests.TestProtocolBuffer").
+		AppendSelectExpr(
+			ExprFunc(func(b *Builder) {
+				b.WriteString(Table("mytable").C("key"))
+				b.Pad()
+				b.Ident("int64_val")
+			}),
+			ExprFunc(func(b *Builder) {
+				b.WriteString(Table("mytable").C("name"))
+				b.Pad()
+				b.Ident("string_val")
+			}),
+		).
+		From(Table("mytable")).
+		Query()
+	require.Equal(t, "SELECT AS `tests.TestProtocolBuffer` `mytable`.`key` `int64_val`, `mytable`.`name` `string_val` FROM `mytable`", query)
+	require.Empty(t, args)
+}
+
 func TestSelector_Union(t *testing.T) {
 	query, args := Dialect(dialect.Postgres).
 		Select("*").
