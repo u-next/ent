@@ -584,6 +584,17 @@ var drivers = func(v string) map[string]driver {
 			postgres.DefaultDiff,
 			postgres.DefaultPlan,
 		},
+		entdialect.Spanner: {
+			// TODO: user Spanner driver when available.
+			&Postgres{
+				version: v,
+				Driver:  nopDriver{dialect: entdialect.Postgres},
+			},
+			// TODO: Atlas community edition does not support diffing Spanner schemas yet.
+			postgres.DefaultDiff,
+			// TODO: Atlas community edition does not support planning Spanner migrations yet.
+			postgres.DefaultPlan,
+		},
 	}
 }
 
