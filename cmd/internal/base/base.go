@@ -17,6 +17,7 @@ import (
 	"unicode"
 
 	"entgo.io/ent/cmd/internal/printer"
+	gqlschema "entgo.io/ent/dialect/gql/schema"
 	"entgo.io/ent/dialect/sql/schema"
 	"entgo.io/ent/entc"
 	"entgo.io/ent/entc/gen"
@@ -123,22 +124,36 @@ func NewCmd() *cobra.Command {
 
 // DescribeCmd returns the describe command for ent/c packages.
 func DescribeCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "describe [flags] path",
-		Short: "print a description of the graph schema",
-		Example: examples(
-			"ent describe ./ent/schema",
-			"ent describe github.com/a8m/x",
-		),
-		Args: cobra.ExactArgs(1),
-		Run: func(cmd *cobra.Command, path []string) {
-			graph, err := entc.LoadGraph(path[0], &gen.Config{})
-			if err != nil {
-				log.Fatalln(err)
-			}
-			printer.Fprint(os.Stdout, graph)
-		},
-	}
+	var (
+		format string
+		cmd    = &cobra.Command{
+			Use:   "describe [flags] path",
+			Short: "print a description of the graph schema",
+			Example: examples(
+				"ent describe ./ent/schema",
+				"ent describe github.com/a8m/x",
+			),
+			Args: cobra.ExactArgs(1),
+			Run: func(cmd *cobra.Command, path []string) {
+				graph, err := entc.LoadGraph(path[0], &gen.Config{})
+				if err != nil {
+					log.Fatalln(err)
+				}
+				switch format {
+				case "table":
+					printer.Fprint(os.Stdout, graph)
+					return
+				case "dot", "svg":
+					printer.Graphviz(cmd.Context(), os.Stdout, graph)
+					return
+				default:
+					log.Fatalln("unknown format:", format)
+				}
+			},
+		}
+	)
+	cmd.Flags().StringVarP(&format, "format", "f", "table", "output format (table|dot|svg)")
+	return cmd
 }
 
 // GenerateCmd returns the generate command for ent/c packages.
@@ -216,6 +231,7 @@ func SchemaCmd() *cobra.Command {
 		dlct, version       string
 		features, buildTags []string
 		hashSymbols         bool
+		graph               bool
 		cmd                 = &cobra.Command{
 			Use:   "schema [flags] path",
 			Short: "dump the DDL for the schema directory",
@@ -265,6 +281,24 @@ func SchemaCmd() *cobra.Command {
 					log.Fatalln(err)
 				}
 				fmt.Println(ddl)
+				// Output the property graph DDL if requested.
+				if graph {
+					fmt.Println("-- Property Graph DDL")
+					pgs, err := g.PropertyGraphs()
+					if err != nil {
+						log.Fatalln(err)
+					}
+					ddl, err := gqlschema.PropertyGraphDDL(cmd.Context(), gqlschema.DDLArgs{
+						Dialect:        dlct,
+						Version:        version,
+						HashSymbols:    hashSymbols,
+						PropertyGraphs: pgs,
+					})
+					if err != nil {
+						log.Fatalln(err)
+					}
+					fmt.Println(ddl)
+				}
 			},
 		}
 	)
@@ -273,6 +307,7 @@ func SchemaCmd() *cobra.Command {
 	cmd.Flags().StringSliceVarP(&features, "feature", "", nil, "extend codegen with additional features")
 	cmd.Flags().StringSliceVarP(&buildTags, "build-tags", "", nil, "go build tags to use when loading the schema graph")
 	cmd.Flags().BoolVar(&hashSymbols, "hash-symbols", false, "whether to hash long symbols")
+	cmd.Flags().BoolVar(&graph, "graph", false, "whether to output the property graph schema")
 	cobra.CheckErr(cmd.MarkFlagRequired("dialect"))
 	return cmd
 }
