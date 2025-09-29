@@ -2529,6 +2529,9 @@ func (s *Selector) Query() (string, []any) {
 			b.Ident(t.Name())
 		case *queryView:
 			b.Join(t.Querier)
+		default:
+			// FIXME: panic if not a Querier?
+			b.Join(t.(Querier))
 		}
 	}
 	for _, join := range s.joins {

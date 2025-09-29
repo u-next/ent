@@ -4,21 +4,23 @@ import (
 	"strconv"
 	"testing"
 
+	"entgo.io/ent/dialect/sql"
 	"github.com/stretchr/testify/require"
 )
 
 func TestBuilder(t *testing.T) {
 	tests := []struct {
-		input     Querier
+		input     sql.Querier
 		wantQuery string
 		wantArgs  []any
 	}{
 		{
 			input: Graph("FinGraph").
-				Match(Path().
-					From(Node().Labels("Account")).
-					Via(Edge().Labels("Transfers").RightDirection()).
-					To(Node().Variable("account").Labels("Account")),
+				Match(
+					Path().
+						From(Node().Labels("Account")).
+						Via(Edge().Labels("Transfers").RightDirection()).
+						To(Node().Variable("account").Labels("Account")),
 				).
 				Return(
 					Column("account"),
@@ -28,32 +30,32 @@ func TestBuilder(t *testing.T) {
 					Column("account"),
 				).
 				Next().
-				Match(Path().
-					To(Node().Variable("account").Labels("Account")).
-					Via(Edge().Labels("Owns").LeftDirection()).
-					From(Node().Variable("owner").Labels("Person")),
+				Match(
+					Path().
+						To(Node().Variable("account").Labels("Account")).
+						Via(Edge().Labels("Owns").LeftDirection()).
+						From(Node().Variable("owner").Labels("Person")),
 				).
 				Return(
 					Column("account.id").As("account_id"),
 					Column("owner.name").As("owner_name"),
 					Column("num_incoming_transfers"),
 				),
-			wantQuery: "GRAPH `FinGraph`" + `
-MATCH (:Account)-[:Transfers]->(account:Account)
-RETURN account, COUNT(*) AS ` + "`num_incoming_transfers`" + `
-GROUP BY account
-
-NEXT
-
-MATCH (account:Account)<-[:Owns]-(owner:Person)
-RETURN account.id AS ` + "`account_id`, owner.name AS `owner_name`, num_incoming_transfers",
+			wantQuery: "GRAPH `FinGraph`\n" +
+				"MATCH (:Account)-[:Transfers]->(account:Account)\n" +
+				"RETURN account, COUNT(*) AS `num_incoming_transfers`\n" +
+				"GROUP BY account\n\n" +
+				"NEXT\n\n" +
+				"MATCH (account:Account)<-[:Owns]-(owner:Person)\n" +
+				"RETURN account.id AS `account_id`, owner.name AS `owner_name`, num_incoming_transfers",
 		},
 		{
 			input: Graph("FinGraph").
-				Match(Path().
-					From(Node().Variable("p").Labels("Person")).
-					Via(Edge().Variable("o").Labels("Owns").RightDirection()).
-					To(Node().Variable("a").Labels("Account")),
+				Match(
+					Path().
+						From(Node().Variable("p").Labels("Person")).
+						Via(Edge().Variable("o").Labels("Owns").RightDirection()).
+						To(Node().Variable("a").Labels("Account")),
 				).
 				Filter(
 					NEQ("p.Id", "1"),
@@ -63,17 +65,18 @@ RETURN account.id AS ` + "`account_id`, owner.name AS `owner_name`, num_incoming
 					Column("a.Id").As("account_id"),
 				),
 			wantArgs: []any{"1"},
-			wantQuery: "GRAPH `FinGraph`" + `
-MATCH (p:Person)-[o:Owns]->(a:Account)
-FILTER ` + "`p.Id` <> ?" + `
-RETURN p.name, a.Id AS ` + "`account_id`",
+			wantQuery: "GRAPH `FinGraph`\n" +
+				"MATCH (p:Person)-[o:Owns]->(a:Account)\n" +
+				"FILTER `p.Id` <> ?\n" +
+				"RETURN p.name, a.Id AS `account_id`",
 		},
 		{
 			input: Graph("FinGraph").
-				Match(Path().
-					From(Node().Variable("p").Labels("Person")).
-					Via(Edge().Variable("o").Labels("Owns").RightDirection()).
-					To(Node().Variable("a").Labels("Account")),
+				Match(
+					Path().
+						From(Node().Variable("p").Labels("Person")).
+						Via(Edge().Variable("o").Labels("Owns").RightDirection()).
+						To(Node().Variable("a").Labels("Account")),
 				).
 				For(
 					For("element").In(Expr("[\"all\",\"some\"]")).WithOffset(),
@@ -88,18 +91,19 @@ RETURN p.name, a.Id AS ` + "`account_id`",
 					Column("element"),
 					Column("offset"),
 				),
-			wantQuery: "GRAPH `FinGraph`" + `
-MATCH (p:Person)-[o:Owns]->(a:Account)
-FOR element IN ["all","some"] WITH OFFSET
-RETURN p.Id, element AS ` + "`alert_type`, offset" + `
-ORDER BY p.Id, element, offset`,
+			wantQuery: "GRAPH `FinGraph`\n" +
+				"MATCH (p:Person)-[o:Owns]->(a:Account)\n" +
+				"FOR element IN [\"all\",\"some\"] WITH OFFSET\n" +
+				"RETURN p.Id, element AS `alert_type`, offset\n" +
+				"ORDER BY p.Id, element, offset",
 		},
 		{
 			input: Graph("FinGraph").
-				Match(Path().
-					From(Node().Variable("source").Labels("Account")).
-					Via(Edge().Variable("e").Labels("Transfers").RightDirection()).
-					To(Node().Variable("destination").Labels("Account")),
+				Match(
+					Path().
+						From(Node().Variable("source").Labels("Account")).
+						Via(Edge().Variable("e").Labels("Transfers").RightDirection()).
+						To(Node().Variable("destination").Labels("Account")),
 				).
 				Let(
 					Assign("a", Expr("source")),
@@ -107,17 +111,18 @@ ORDER BY p.Id, element, offset`,
 				Return(
 					Column("a.id").As("a_id"),
 				),
-			wantQuery: "GRAPH `FinGraph`" + `
-MATCH (source:Account)-[e:Transfers]->(destination:Account)
-LET a = source
-RETURN a.id AS ` + "`a_id`",
+			wantQuery: "GRAPH `FinGraph`\n" +
+				"MATCH (source:Account)-[e:Transfers]->(destination:Account)\n" +
+				"LET a = source\n" +
+				"RETURN a.id AS `a_id`",
 		},
 		{
 			input: Graph("FinGraph").
-				Match(Path().
-					From(Node().Variable("source").Labels("Account")).
-					Via(Edge().Variable("e").Labels("Transfers").RightDirection()).
-					To(Node().Variable("destination").Labels("Account")),
+				Match(
+					Path().
+						From(Node().Variable("source").Labels("Account")).
+						Via(Edge().Variable("e").Labels("Transfers").RightDirection()).
+						To(Node().Variable("destination").Labels("Account")),
 				).
 				OrderBy(
 					Column("source.Id"),
@@ -127,11 +132,11 @@ RETURN a.id AS ` + "`a_id`",
 					Column("source.Id"),
 					Column("source.nick_name"),
 				),
-			wantQuery: "GRAPH `FinGraph`" + `
-MATCH (source:Account)-[e:Transfers]->(destination:Account)
-ORDER BY source.Id
-LIMIT 3
-RETURN source.Id, source.nick_name`,
+			wantQuery: "GRAPH `FinGraph`\n" +
+				"MATCH (source:Account)-[e:Transfers]->(destination:Account)\n" +
+				"ORDER BY source.Id\n" +
+				"LIMIT 3\n" +
+				"RETURN source.Id, source.nick_name",
 		},
 		{
 			input: Graph("FinGraph").
@@ -143,10 +148,10 @@ RETURN source.Id, source.nick_name`,
 					Column("p.name"),
 					Column("p.id"),
 				),
-			wantQuery: "GRAPH `FinGraph`" + `
-MATCH (p:Person)
-OFFSET 2
-RETURN p.name, p.id`,
+			wantQuery: "GRAPH `FinGraph`\n" +
+				"MATCH (p:Person)\n" +
+				"OFFSET 2\n" +
+				"RETURN p.name, p.id",
 		},
 		{
 			input: Graph("FinGraph").
@@ -159,18 +164,19 @@ RETURN p.name, p.id`,
 				).
 				Limit(1).
 				Offset(1),
-			wantQuery: "GRAPH `FinGraph`" + `
-MATCH (p:Person)
-RETURN p.name, p.id
-LIMIT 1
-OFFSET 1`,
+			wantQuery: "GRAPH `FinGraph`\n" +
+				"MATCH (p:Person)\n" +
+				"RETURN p.name, p.id\n" +
+				"LIMIT 1\n" +
+				"OFFSET 1",
 		},
 		{
 			input: Graph("FinGraph").
-				Match(Path().
-					From(Node().Variable("src").Labels("Account")).
-					Via(Edge().Variable("transfer").Labels("Transfers").RightDirection()).
-					To(Node().Variable("dst").Labels("Account")),
+				Match(
+					Path().
+						From(Node().Variable("src").Labels("Account")).
+						Via(Edge().Variable("transfer").Labels("Transfers").RightDirection()).
+						To(Node().Variable("dst").Labels("Account")),
 				).
 				WithDistinct(
 					Column("dst"),
@@ -178,10 +184,10 @@ OFFSET 1`,
 				Return(
 					Column("dst.id").As("destination_id"),
 				),
-			wantQuery: "GRAPH `FinGraph`" + `
-MATCH (src:Account)-[transfer:Transfers]->(dst:Account)
-WITH DISTINCT dst
-RETURN dst.id AS ` + "`destination_id`",
+			wantQuery: "GRAPH `FinGraph`\n" +
+				"MATCH (src:Account)-[transfer:Transfers]->(dst:Account)\n" +
+				"WITH DISTINCT dst\n" +
+				"RETURN dst.id AS `destination_id`",
 		},
 		{
 			input: Graph("FinGraph").
@@ -200,48 +206,54 @@ RETURN dst.id AS ` + "`destination_id`",
 					Column("2").As("group_id"),
 					Column("p.name"),
 				),
-			wantQuery: "GRAPH `FinGraph`" + `
-MATCH (p:Person)
-RETURN p.name, 1 AS ` + "`group_id`" + `
-UNION ALL
-MATCH (p:Person)
-RETURN 2 AS ` + "`group_id`, p.name",
+			wantQuery: "GRAPH `FinGraph`\n" +
+				"MATCH (p:Person)\n" +
+				"RETURN p.name, 1 AS `group_id`\n" +
+				"UNION ALL\n" +
+				"MATCH (p:Person)\n" +
+				"RETURN 2 AS `group_id`, p.name",
 		},
 		{
 			input: Graph("FinGraph").
-				Match(Path().
-					From(Node().Variable("p").Labels("Person").Property("id", 1)).
-					Via(Edge().Labels("Owns").RightDirection()).
-					To(Node().Variable("a").Labels("Account")),
+				Match(
+					Path().
+						From(Node().Variable("p").Labels("Person").Property("id", 1)).
+						Via(Edge().Labels("Owns").RightDirection()).
+						To(Node().Variable("a").Labels("Account")),
 				).
-				MatchWithHint(Hint{"JOIN_METHOD": "APPLY_JOIN"}, Path().
-					From(Node().Variable("a").Labels("Account")).
-					Via(Edge().Variable("e").Labels("Transfers").RightDirection()).
-					To(Node().Variable("oa").Labels("Account")),
+				MatchWithHint(
+					Hint{"JOIN_METHOD": "APPLY_JOIN"},
+					Path().
+						From(Node().Variable("a").Labels("Account")).
+						Via(Edge().Variable("e").Labels("Transfers").RightDirection()).
+						To(Node().Variable("oa").Labels("Account")),
 				).
 				Return(
 					Column("oa.id"),
 				),
 			wantArgs: []any{1},
-			wantQuery: "GRAPH `FinGraph`" + `
-MATCH (p:Person {id: ?})-[:Owns]->(a:Account)
-MATCH @{JOIN_METHOD=APPLY_JOIN} (a:Account)-[e:Transfers]->(oa:Account)
-RETURN oa.id`,
+			wantQuery: "GRAPH `FinGraph`\n" +
+				"MATCH (p:Person {id: ?})-[:Owns]->(a:Account)\n" +
+				"MATCH @{JOIN_METHOD=APPLY_JOIN} (a:Account)-[e:Transfers]->(oa:Account)\n" +
+				"RETURN oa.id",
 		},
 		{
-			input: GraphTable(Graph("FinGraph").
-				Match(
-					Node().Variable("n").Labels("Person"),
-				).
-				Return(
-					Column("n.name"),
-				),
-			).As("PersonNames"),
-			wantQuery: "GRAPH_TABLE(" + `
-	` + "`FinGraph`" + `
-	MATCH (n:Person)
-	RETURN n.name
-) AS ` + "`PersonNames`",
+			input: sql.Select("n.name", "n.id").From(
+				GraphTable(
+					Graph("FinGraph").
+						Match(
+							Node().Variable("n").Labels("Person"),
+						).
+						Return(
+							Column("n"),
+						),
+				).As("PersonNames"),
+			),
+			wantQuery: "SELECT `n.name`, `n.id` FROM GRAPH_TABLE(\n" +
+				"\t`FinGraph`\n" +
+				"\tMATCH (n:Person)\n" +
+				"\tRETURN n\n" +
+				") AS `PersonNames`",
 		},
 	}
 

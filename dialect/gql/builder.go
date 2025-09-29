@@ -9,15 +9,7 @@ import (
 	"entgo.io/ent/dialect/sql"
 )
 
-// Querier wraps the basic Query method that is implemented
-// by the different builders in this package.
-type Querier interface {
-	// Query returns the GQL query representation of the element
-	// and its arguments (if any).
-	Query() (string, []any)
-}
-
-// querierErr allowed propagate Querier's inner error
+// querierErr allowed propagate sql.Querier's inner error
 type querierErr interface {
 	Err() error
 }
@@ -33,7 +25,7 @@ type state interface {
 
 // Statement is a linear query statement.
 type Statement interface {
-	Querier
+	sql.Querier
 	stmt()
 }
 
@@ -329,7 +321,7 @@ func (f *FilterBuilder) stmt() {}
 // columnExpr represents a single column expression.
 type columnExpr struct {
 	Builder
-	expr    Querier
+	expr    sql.Querier
 	alias   string
 	star    bool
 	collate string
@@ -398,9 +390,9 @@ type ReturnBuilder struct {
 	Builder
 	all      bool
 	distinct bool
-	items    []Querier
-	groupBy  []Querier
-	orderBy  []Querier
+	items    []sql.Querier
+	groupBy  []sql.Querier
+	orderBy  []sql.Querier
 	limit    int64
 	offset   int64
 }
@@ -429,13 +421,13 @@ func (r *ReturnBuilder) Append(items ...*columnExpr) *ReturnBuilder {
 }
 
 // GroupBy adds a GROUP BY clause.
-func (r *ReturnBuilder) GroupBy(exprs ...Querier) *ReturnBuilder {
+func (r *ReturnBuilder) GroupBy(exprs ...sql.Querier) *ReturnBuilder {
 	r.groupBy = append(r.groupBy, exprs...)
 	return r
 }
 
 // OrderBy adds an ORDER BY clause.
-func (r *ReturnBuilder) OrderBy(expr ...Querier) *ReturnBuilder {
+func (r *ReturnBuilder) OrderBy(expr ...sql.Querier) *ReturnBuilder {
 	r.orderBy = append(r.orderBy, expr...)
 	return r
 }
@@ -492,11 +484,11 @@ func (r *ReturnBuilder) stmt() {}
 // assignment represents a variable assignment in a LET statement.
 type assignment struct {
 	variable string
-	value    Querier
+	value    sql.Querier
 }
 
 // Assign creates a new assignment expression.
-func Assign(name string, value Querier) *assignment {
+func Assign(name string, value sql.Querier) *assignment {
 	return &assignment{
 		variable: name,
 		value:    value,
@@ -510,7 +502,7 @@ func (a *assignment) Var(name string) *assignment {
 }
 
 // Value sets the expression to assign.
-func (a *assignment) Value(value Querier) *assignment {
+func (a *assignment) Value(value sql.Querier) *assignment {
 	a.value = value
 	return a
 }
@@ -550,7 +542,7 @@ func (l *LetBuilder) stmt() {}
 // GroupByBuilder is a builder for GROUP BY statements.
 type GroupByBuilder struct {
 	Builder
-	exprs []Querier
+	exprs []sql.Querier
 }
 
 // GroupBy creates a new GROUP BY statement builder.
@@ -578,7 +570,7 @@ func (g *GroupByBuilder) stmt() {}
 // OrderByBuilder is a builder for ORDER BY statements.
 type OrderByBuilder struct {
 	Builder
-	orders []Querier
+	orders []sql.Querier
 }
 
 // OrderBy creates a new ORDER BY statement builder.
@@ -669,7 +661,7 @@ func (o *OffsetBuilder) stmt() {}
 type ForBuilder struct {
 	Builder
 	element string
-	array   Querier
+	array   sql.Querier
 	offset  string
 }
 
@@ -685,7 +677,7 @@ func (f *ForBuilder) Element(name string) *ForBuilder {
 }
 
 // In sets the array expression to iterate over.
-func (f *ForBuilder) In(array Querier) *ForBuilder {
+func (f *ForBuilder) In(array sql.Querier) *ForBuilder {
 	f.array = array
 	return f
 }
@@ -744,8 +736,8 @@ type WithBuilder struct {
 	Builder
 	all      bool
 	distinct bool
-	items    []Querier
-	groupBy  []Querier
+	items    []sql.Querier
+	groupBy  []sql.Querier
 }
 
 // With creates a new WITH statement builder.
@@ -772,7 +764,7 @@ func (w *WithBuilder) Append(items ...*columnExpr) *WithBuilder {
 }
 
 // GroupBy adds a GROUP BY clause.
-func (w *WithBuilder) GroupBy(exprs ...Querier) *WithBuilder {
+func (w *WithBuilder) GroupBy(exprs ...sql.Querier) *WithBuilder {
 	w.groupBy = append(w.groupBy, exprs...)
 	return w
 }
@@ -868,7 +860,7 @@ func ExceptDistinct() SetOperation {
 }
 
 // Queries are list of queries join with space between them.
-type Queries []Querier
+type Queries []sql.Querier
 
 // Query returns query representation of Queriers.
 func (n Queries) Query() (string, []any) {
@@ -1159,7 +1151,7 @@ func (b *Builder) Arg(a any) *Builder {
 	case *raw:
 		b.WriteString(v.s)
 		return b
-	case Querier:
+	case sql.Querier:
 		b.Join(v)
 		return b
 	}
@@ -1189,7 +1181,7 @@ func (b *Builder) Argf(format string, a any) *Builder {
 	case *raw:
 		b.WriteString(a.s)
 		return b
-	case Querier:
+	case sql.Querier:
 		b.Join(a)
 		return b
 	}
@@ -1210,17 +1202,17 @@ func (b *Builder) Pad() *Builder {
 }
 
 // Join joins a list of Queries to the builder.
-func (b *Builder) Join(qs ...Querier) *Builder {
+func (b *Builder) Join(qs ...sql.Querier) *Builder {
 	return b.join(qs, "")
 }
 
 // JoinComma joins a list of Queries and adds comma between them.
-func (b *Builder) JoinComma(qs ...Querier) *Builder {
+func (b *Builder) JoinComma(qs ...sql.Querier) *Builder {
 	return b.join(qs, ", ")
 }
 
 // join a list of Queries to the builder with a given separator.
-func (b *Builder) join(qs []Querier, sep string) *Builder {
+func (b *Builder) join(qs []sql.Querier, sep string) *Builder {
 	for i, q := range qs {
 		if i > 0 {
 			b.WriteString(sep)
@@ -1295,7 +1287,7 @@ func (b *Builder) SetDialect(dialect string) {
 	// GQL dialect is fixed, but we implement the interface
 }
 
-// Query implements the Querier interface.
+// Query implements the sql.Querier interface.
 func (b Builder) Query() (string, []any) {
 	return b.String(), b.args
 }
@@ -1390,14 +1382,14 @@ func isAlias(s string) bool {
 // Pattern builders for MATCH clauses
 
 type Pattern interface {
-	Querier
+	sql.Querier
 	pattern()
 }
 
 // GraphPattern is a builder for graph patterns.
 type GraphPattern struct {
 	Builder
-	pathPatterns []Querier
+	pathPatterns []sql.Querier
 	where        *Predicate
 }
 
@@ -1440,7 +1432,7 @@ type PathPattern struct {
 	variable     string
 	searchPrefix PathSearchPrefix
 	pathMode     PathMode
-	elements     []Querier
+	elements     []sql.Querier
 	quantifier   *QuantifierBuilder
 }
 
@@ -1519,7 +1511,7 @@ func (p *PathPattern) Trail() *PathPattern {
 }
 
 // Append adds more elements to the path pattern.
-func (p *PathPattern) Append(elements ...Querier) *PathPattern {
+func (p *PathPattern) Append(elements ...sql.Querier) *PathPattern {
 	p.elements = append(p.elements, elements...)
 	return p
 }
@@ -1709,8 +1701,8 @@ type EdgePattern struct {
 	variable        string
 	labelExpression *LabelExpressionBuilder
 	properties      map[string]any
-	where           Querier
-	quantifier      Querier
+	where           sql.Querier
+	quantifier      sql.Querier
 	abbreviated     bool
 }
 
@@ -1765,13 +1757,13 @@ func (e *EdgePattern) Property(key string, value any) *EdgePattern {
 }
 
 // Where adds a WHERE condition.
-func (e *EdgePattern) Where(condition Querier) *EdgePattern {
+func (e *EdgePattern) Where(condition sql.Querier) *EdgePattern {
 	e.where = condition
 	return e
 }
 
 // Quantifier sets the path quantifier.
-func (e *EdgePattern) Quantifier(quantifier Querier) *EdgePattern {
+func (e *EdgePattern) Quantifier(quantifier sql.Querier) *EdgePattern {
 	e.quantifier = quantifier
 	return e
 }
@@ -1865,8 +1857,8 @@ func (e *EdgePattern) pattern() {}
 // SubpathPatternBuilder is a builder for subpath patterns.
 type SubpathPatternBuilder struct {
 	Builder
-	elements   []Querier
-	where      Querier
+	elements   []sql.Querier
+	where      sql.Querier
 	quantifier *QuantifierBuilder
 	pathMode   PathMode
 }
@@ -1877,13 +1869,13 @@ func Subpath() *SubpathPatternBuilder {
 }
 
 // AddElement adds an element pattern to the subpath.
-func (s *SubpathPatternBuilder) AddElement(element Querier) *SubpathPatternBuilder {
+func (s *SubpathPatternBuilder) AddElement(element sql.Querier) *SubpathPatternBuilder {
 	s.elements = append(s.elements, element)
 	return s
 }
 
 // Where adds a WHERE condition to the subpath.
-func (s *SubpathPatternBuilder) Where(condition Querier) *SubpathPatternBuilder {
+func (s *SubpathPatternBuilder) Where(condition sql.Querier) *SubpathPatternBuilder {
 	s.where = condition
 	return s
 }
@@ -2034,7 +2026,7 @@ func (q *QuantifierBuilder) Query() (string, []any) {
 // QuantifiedPatternBuilder is a builder for quantified path patterns.
 type QuantifiedPatternBuilder struct {
 	Builder
-	ptn        Querier
+	ptn        sql.Querier
 	quantifier *QuantifierBuilder
 }
 
@@ -2044,7 +2036,7 @@ func Quantified() *QuantifiedPatternBuilder {
 }
 
 // Pattern sets the pattern to be quantified.
-func (q *QuantifiedPatternBuilder) Pattern(pattern Querier) *QuantifiedPatternBuilder {
+func (q *QuantifiedPatternBuilder) Pattern(pattern sql.Querier) *QuantifiedPatternBuilder {
 	q.ptn = pattern
 	return q
 }
@@ -2594,12 +2586,12 @@ func ExprP(expr string, args ...any) *Predicate {
 }
 
 // Exists returns the EXISTS predicate.
-func Exists(query Querier) *Predicate {
+func Exists(query sql.Querier) *Predicate {
 	return P().Exists(query)
 }
 
 // Exists appends the EXISTS predicate with the given query.
-func (p *Predicate) Exists(query Querier) *Predicate {
+func (p *Predicate) Exists(query sql.Querier) *Predicate {
 	return p.Append(func(b *Builder) {
 		b.WriteString("EXISTS ")
 		b.WrapBraces(func(b *Builder) {
@@ -2609,7 +2601,7 @@ func (p *Predicate) Exists(query Querier) *Predicate {
 }
 
 // InSubquery adds an "IN" predicate with a subquery.
-func (p *Predicate) InSubquery(value string, query Querier) *Predicate {
+func (p *Predicate) InSubquery(value string, query sql.Querier) *Predicate {
 	p.Ident(value).WriteOp(OpIn)
 	p.WrapBraces(func(b *Builder) {
 		b.Join(query)
@@ -2618,7 +2610,7 @@ func (p *Predicate) InSubquery(value string, query Querier) *Predicate {
 }
 
 // NotInSubquery adds a "NOT IN" predicate with a subquery.
-func (p *Predicate) NotInSubquery(value string, query Querier) *Predicate {
+func (p *Predicate) NotInSubquery(value string, query sql.Querier) *Predicate {
 	p.Ident(value).WriteOp(OpNotIn)
 	p.WrapBraces(func(b *Builder) {
 		b.Join(query)
@@ -2627,22 +2619,22 @@ func (p *Predicate) NotInSubquery(value string, query Querier) *Predicate {
 }
 
 // NotExists returns the NOT EXISTS predicate.
-func NotExists(query Querier) *Predicate {
+func NotExists(query sql.Querier) *Predicate {
 	return P().NotExists(query)
 }
 
 // InSubquery returns an "IN" predicate with a subquery.
-func InSubquery(value string, query Querier) *Predicate {
+func InSubquery(value string, query sql.Querier) *Predicate {
 	return P().InSubquery(value, query)
 }
 
 // NotInSubquery returns a "NOT IN" predicate with a subquery.
-func NotInSubquery(value string, query Querier) *Predicate {
+func NotInSubquery(value string, query sql.Querier) *Predicate {
 	return P().NotInSubquery(value, query)
 }
 
 // NotExists appends the NOT EXISTS predicate with the given query.
-func (p *Predicate) NotExists(query Querier) *Predicate {
+func (p *Predicate) NotExists(query sql.Querier) *Predicate {
 	return p.Append(func(b *Builder) {
 		b.WriteString("NOT EXISTS ")
 		b.Wrap(func(b *Builder) {
@@ -2765,14 +2757,14 @@ func PropertyExists(element, property string) *Predicate {
 }
 
 // Raw returns a raw GQL query that is placed as-is in the query.
-func Raw(s string) Querier { return &raw{s} }
+func Raw(s string) sql.Querier { return &raw{s} }
 
 type raw struct{ s string }
 
 func (r *raw) Query() (string, []any) { return r.s, nil }
 
-// Expr returns an GQL expression that implements the Querier interface.
-func Expr(exr string, args ...any) Querier { return &expr{s: exr, args: args} }
+// Expr returns an GQL expression that implements the sql.Querier interface.
+func Expr(exr string, args ...any) sql.Querier { return &expr{s: exr, args: args} }
 
 type expr struct {
 	s    string
@@ -2781,8 +2773,8 @@ type expr struct {
 
 func (e *expr) Query() (string, []any) { return e.s, e.args }
 
-// ExprFunc returns an expression function that implements the Querier interface.
-func ExprFunc(fn func(*Builder)) Querier {
+// ExprFunc returns an expression function that implements the sql.Querier interface.
+func ExprFunc(fn func(*Builder)) sql.Querier {
 	return &exprFunc{fn: fn}
 }
 
@@ -2897,11 +2889,11 @@ func SourceNodeID(edge any) *FuncBuilder {
 // ArraySubqueryBuilder is a builder for ARRAY subqueries.
 type ArraySubqueryBuilder struct {
 	Builder
-	query Querier
+	query sql.Querier
 }
 
 // ArraySubquery creates a new ARRAY subquery builder.
-func ArraySubquery(query Querier) *ArraySubqueryBuilder {
+func ArraySubquery(query sql.Querier) *ArraySubqueryBuilder {
 	return &ArraySubqueryBuilder{query: query}
 }
 
@@ -2917,11 +2909,11 @@ func (a *ArraySubqueryBuilder) Query() (string, []any) {
 // ValueSubqueryBuilder is a builder for VALUE subqueries.
 type ValueSubqueryBuilder struct {
 	Builder
-	query Querier
+	query sql.Querier
 }
 
 // ValueSubquery creates a new VALUE subquery builder.
-func ValueSubquery(query Querier) *ValueSubqueryBuilder {
+func ValueSubquery(query sql.Querier) *ValueSubqueryBuilder {
 	return &ValueSubqueryBuilder{query: query}
 }
 
