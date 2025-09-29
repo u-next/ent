@@ -1137,7 +1137,7 @@ func (b *Builder) WriteOp(op Op) *Builder {
 	case op == OpNot:
 		b.WriteString(gqlOps[op]).Pad()
 	case op == OpConcat || op == OpGraphOr || op == OpGraphAnd:
-		b.Pad().WriteString(gqlOps[op]).Pad()
+		b.WriteString(gqlOps[op])
 	case op == OpGraphNot:
 		b.WriteString(gqlOps[op])
 	case op >= OpIsLabeled && op <= OpIsNotDestination:
@@ -1599,10 +1599,10 @@ func (p *PathPattern) pattern() {}
 // NodePattern is a builder for node patterns.
 type NodePattern struct {
 	Builder
-	variable        string
-	labelExpression *LabelExpressionBuilder
-	properties      map[string]any
-	where           *Predicate
+	variable   string
+	labelExpr  *LabelExpr
+	properties map[string]any
+	where      *Predicate
 }
 
 // Node creates a new node pattern builder.
@@ -1620,13 +1620,17 @@ func (n *NodePattern) Variable(name string) *NodePattern {
 
 // Labels sets the node labels using simple OR logic.
 func (n *NodePattern) Labels(labels ...string) *NodePattern {
-	n.labelExpression = Labels(labels...)
+	ls := make([]*LabelExpr, len(labels))
+	for i, l := range labels {
+		ls[i] = L(l)
+	}
+	n.labelExpr = OrL(ls...)
 	return n
 }
 
 // LabelExpression sets a complex label expression.
-func (n *NodePattern) LabelExpression(expr *LabelExpressionBuilder) *NodePattern {
-	n.labelExpression = expr
+func (n *NodePattern) LabelExpr(expr *LabelExpr) *NodePattern {
+	n.labelExpr = expr
 	return n
 }
 
@@ -1664,15 +1668,9 @@ func (n *NodePattern) Query() (string, []any) {
 		n.WriteString(n.variable)
 	}
 
-	if n.labelExpression != nil {
+	if n.labelExpr != nil {
 		n.WriteByte(':')
-		if n.labelExpression.needsParens() {
-			n.WriteByte('(')
-			n.Join(n.labelExpression)
-			n.WriteByte(')')
-		} else {
-			n.Join(n.labelExpression)
-		}
+		n.Join(n.labelExpr)
 	}
 
 	if len(n.properties) > 0 {
@@ -1712,13 +1710,13 @@ const (
 // EdgePattern is a builder for edge patterns.
 type EdgePattern struct {
 	Builder
-	direction       EdgeDirection
-	variable        string
-	labelExpression *LabelExpressionBuilder
-	properties      map[string]any
-	where           sql.Querier
-	quantifier      sql.Querier
-	abbreviated     bool
+	direction   EdgeDirection
+	variable    string
+	labelExpr   *LabelExpr
+	properties  map[string]any
+	where       sql.Querier
+	quantifier  sql.Querier
+	abbreviated bool
 }
 
 // Edge creates a new edge pattern builder.
@@ -1755,13 +1753,17 @@ func (e *EdgePattern) Variable(name string) *EdgePattern {
 
 // Labels sets the edge labels using simple OR logic.
 func (e *EdgePattern) Labels(labels ...string) *EdgePattern {
-	e.labelExpression = Labels(labels...)
+	ls := make([]*LabelExpr, len(labels))
+	for i, l := range labels {
+		ls[i] = L(l)
+	}
+	e.labelExpr = OrL(ls...)
 	return e
 }
 
-// LabelExpression sets a complex label expression.
-func (e *EdgePattern) LabelExpression(expr *LabelExpressionBuilder) *EdgePattern {
-	e.labelExpression = expr
+// LabelExpr sets a complex label expression.
+func (e *EdgePattern) LabelExpr(expr *LabelExpr) *EdgePattern {
+	e.labelExpr = expr
 	return e
 }
 
@@ -1820,15 +1822,9 @@ func (e *EdgePattern) Query() (string, []any) {
 			e.WriteString(e.variable)
 		}
 
-		if e.labelExpression != nil {
+		if e.labelExpr != nil {
 			e.WriteByte(':')
-			if e.labelExpression.needsParens() {
-				e.WriteByte('(')
-				e.Join(e.labelExpression)
-				e.WriteByte(')')
-			} else {
-				e.Join(e.labelExpression)
-			}
+			e.Join(e.labelExpr)
 		}
 
 		if len(e.properties) > 0 {
@@ -2096,121 +2092,95 @@ func (q *QuantifiedPatternBuilder) Query() (string, []any) {
 
 func (q *QuantifiedPatternBuilder) pattern() {}
 
-// LabelExpressionBuilder is a builder for complex label expressions.
-type LabelExpressionBuilder struct {
+// LabelExpr is a builder for complex label expressions.
+type LabelExpr struct {
 	Builder
-	expression string
-	op         *Op
-	left       *LabelExpressionBuilder
-	right      *LabelExpressionBuilder
+	depth int
+	fns   []func(*Builder)
 }
 
-// Label creates a simple label expression.
-func Label(name string) *LabelExpressionBuilder {
-	return &LabelExpressionBuilder{
-		expression: name,
+// L creates a new label expression with the given label name.
+func L(name string) *LabelExpr {
+	return &LabelExpr{
+		fns: []func(*Builder){
+			func(b *Builder) {
+				if name == "" {
+					name = "%" // Wildcard for any label
+				}
+				b.WriteString(name)
+			},
+		},
 	}
 }
 
-// AnyLabel creates a wildcard label expression (%).
-func AnyLabel() *LabelExpressionBuilder {
-	return &LabelExpressionBuilder{
-		expression: "%",
-	}
+func AndL(labels ...*LabelExpr) *LabelExpr {
+	l := &LabelExpr{}
+	return l.Append(func(b *Builder) {
+		l.mayWrap(labels, b, OpGraphAnd)
+	})
 }
 
-// Labels creates a label expression from multiple labels (OR operation).
-func Labels(names ...string) *LabelExpressionBuilder {
-	if len(names) == 0 {
-		return nil
-	}
-	l := Label(names[0])
-	for i := 1; i < len(names); i++ {
-		l = l.Or(Label(names[i]))
-	}
+func OrL(labels ...*LabelExpr) *LabelExpr {
+	l := &LabelExpr{}
+	return l.Append(func(b *Builder) {
+		l.mayWrap(labels, b, OpGraphOr)
+	})
+}
+
+func NotL(label *LabelExpr) *LabelExpr {
+	l := &LabelExpr{}
+	return l.Append(func(b *Builder) {
+		b.WriteOp(OpGraphNot)
+		if len(label.fns) > 1 && l.depth != 0 {
+			b.WriteByte('(')
+			b.Join(label)
+			b.WriteByte(')')
+		} else {
+			b.Join(label)
+		}
+	})
+}
+
+// Append adds a function to the label expression builder.
+func (l *LabelExpr) Append(fns ...func(*Builder)) *LabelExpr {
+	l.fns = append(l.fns, fns...)
 	return l
 }
 
-// Or creates an OR expression between label expressions.
-func (l *LabelExpressionBuilder) Or(right *LabelExpressionBuilder) *LabelExpressionBuilder {
-	op := OpGraphOr
-	return &LabelExpressionBuilder{
-		op:    &op,
-		left:  l,
-		right: right,
+func (l *LabelExpr) mayWrap(exprs []*LabelExpr, b *Builder, op Op) {
+	switch n := len(exprs); {
+	case n == 1:
+		b.Join(exprs[0])
+		return
+	case n > 1 && l.depth != 0:
+		b.WriteByte('(')
+		defer b.WriteByte(')')
 	}
-}
-
-// And creates an AND expression between label expressions.
-func (l *LabelExpressionBuilder) And(right *LabelExpressionBuilder) *LabelExpressionBuilder {
-	op := OpGraphAnd
-	return &LabelExpressionBuilder{
-		op:    &op,
-		left:  l,
-		right: right,
-	}
-}
-
-// Not creates a NOT expression.
-func (l *LabelExpressionBuilder) Not() *LabelExpressionBuilder {
-	op := OpGraphNot
-	return &LabelExpressionBuilder{
-		op:   &op,
-		left: l,
-	}
-}
-
-// NotLabel creates a NOT expression for the given label expression.
-func NotLabel(expr *LabelExpressionBuilder) *LabelExpressionBuilder {
-	return expr.Not()
-}
-
-// Query returns the label expression representation.
-func (l *LabelExpressionBuilder) Query() (string, []any) {
-	if l.op != nil && *l.op == OpGraphNot {
-		l.WriteOp(OpGraphNot)
-		if l.left != nil {
-			if l.left.needsParens() {
-				l.WriteByte('(')
-				l.Join(l.left)
-				l.WriteByte(')')
-			} else {
-				l.Join(l.left)
-			}
+	for i := range exprs {
+		exprs[i].depth = l.depth + 1
+		if i > 0 {
+			b.WriteOp(op)
 		}
-		return l.String(), l.args
-	}
-
-	if l.op != nil && (*l.op == OpGraphOr || *l.op == OpGraphAnd) && l.left != nil && l.right != nil {
-		// Binary operation
-		if l.left.needsParens() {
-			l.WriteByte('(')
-			l.Join(l.left)
-			l.WriteByte(')')
+		if len(exprs[i].fns) > 1 {
+			b.Wrap(func(b *Builder) {
+				b.Join(exprs[i])
+			})
 		} else {
-			l.Join(l.left)
+			b.Join(exprs[i])
 		}
-
-		l.WriteOp(*l.op)
-
-		if l.right.needsParens() {
-			l.WriteByte('(')
-			l.Join(l.right)
-			l.WriteByte(')')
-		} else {
-			l.Join(l.right)
-		}
-		return l.String(), l.args
 	}
+}
 
-	// Simple expression
-	l.WriteString(l.expression)
+// String returns the label expression representation.
+func (l *LabelExpr) Query() (string, []any) {
+	if l.Len() > 0 || len(l.args) > 0 {
+		l.Reset()
+		l.args = nil
+	}
+	for _, f := range l.fns {
+		f(&l.Builder)
+	}
 	return l.String(), l.args
-}
-
-// needsParens returns true if this expression needs parentheses when used in a larger expression.
-func (l *LabelExpressionBuilder) needsParens() bool {
-	return l.op != nil
 }
 
 // PathSearchPrefix represents path search prefix types.
@@ -2390,7 +2360,7 @@ func (p *Predicate) NotNull(column string) *Predicate {
 // Graph-specific predicates
 
 // IsLabeled adds an "IS LABELED" predicate.
-func (p *Predicate) IsLabeled(element string, labelExpr *LabelExpressionBuilder) *Predicate {
+func (p *Predicate) IsLabeled(element string, labelExpr *LabelExpr) *Predicate {
 	return p.Append(func(b *Builder) {
 		b.WriteString(element).WriteOp(OpIsLabeled)
 		if labelExpr != nil {
@@ -2400,7 +2370,7 @@ func (p *Predicate) IsLabeled(element string, labelExpr *LabelExpressionBuilder)
 }
 
 // IsNotLabeled adds an "IS NOT LABELED" predicate.
-func (p *Predicate) IsNotLabeled(element string, labelExpr *LabelExpressionBuilder) *Predicate {
+func (p *Predicate) IsNotLabeled(element string, labelExpr *LabelExpr) *Predicate {
 	return p.Append(func(b *Builder) {
 		b.WriteString(element).WriteOp(OpIsNotLabeled)
 		if labelExpr != nil {
@@ -2726,12 +2696,12 @@ func (*Predicate) arg(b *Builder, a any) {
 // Graph-specific standalone predicates
 
 // IsLabeled returns an "IS LABELED" predicate.
-func IsLabeled(element string, labelExpr *LabelExpressionBuilder) *Predicate {
+func IsLabeled(element string, labelExpr *LabelExpr) *Predicate {
 	return P().IsLabeled(element, labelExpr)
 }
 
 // IsNotLabeled returns an "IS NOT LABELED" predicate.
-func IsNotLabeled(element string, labelExpr *LabelExpressionBuilder) *Predicate {
+func IsNotLabeled(element string, labelExpr *LabelExpr) *Predicate {
 	return P().IsNotLabeled(element, labelExpr)
 }
 

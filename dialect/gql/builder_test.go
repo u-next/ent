@@ -255,6 +255,18 @@ func TestBuilder(t *testing.T) {
 				"\tRETURN n\n" +
 				") AS `PersonNames`",
 		},
+		{
+			input: Graph("FinGraph").
+				Match(
+					Node().Variable("p").LabelExpr(OrL(L("Singer"), AndL(NotL(L("Writer")), NotL(L("Producer"))))),
+				).
+				Return(
+					Column("p.id"),
+				),
+			wantQuery: "GRAPH `FinGraph`\n" +
+				"MATCH (p:Singer|(!Writer&!Producer))\n" +
+				"RETURN p.id",
+		},
 	}
 
 	for i, tt := range tests {
