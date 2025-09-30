@@ -218,7 +218,7 @@ func (h Hint) Query() (string, []any) {
 		i := 0
 		for k, v := range h {
 			if i > 0 {
-				b.Comma().Pad()
+				b.Comma()
 			}
 			b.WriteString(fmt.Sprintf("%s=%s", k, v))
 			i++
@@ -271,7 +271,7 @@ func (m *Matcher) Query() (string, []any) {
 		m.Pad()
 		for i, p := range m.patterns {
 			if i > 0 {
-				m.Comma().Pad()
+				m.Comma()
 			}
 			m.Join(p)
 		}
@@ -552,7 +552,7 @@ func (l *LetBuilder) Query() (string, []any) {
 	l.WriteString("LET ")
 	for i, assign := range l.assignments {
 		if i > 0 {
-			l.Comma().Pad()
+			l.Comma()
 		}
 		l.Ident(assign.variable)
 		l.WriteString(" = ")
@@ -1631,7 +1631,7 @@ type NodePattern struct {
 	Builder
 	variable   string
 	labelExpr  *LabelExpr
-	properties map[string]any
+	properties map[string]sql.Querier
 	where      *Predicate
 }
 
@@ -1654,7 +1654,7 @@ func (n *NodeTableBuilder) L() *LabelExpr {
 // N creates a new node pattern builder.
 func N() *NodePattern {
 	return &NodePattern{
-		properties: make(map[string]any),
+		properties: make(map[string]sql.Querier),
 	}
 }
 
@@ -1681,13 +1681,13 @@ func (n *NodePattern) LabelExpr(expr *LabelExpr) *NodePattern {
 }
 
 // Property adds a property filter.
-func (n *NodePattern) Property(key string, value any) *NodePattern {
-	n.properties[key] = value
+func (n *NodePattern) Property(key string, expr sql.Querier) *NodePattern {
+	n.properties[key] = expr
 	return n
 }
 
 // Properties adds multiple property filters.
-func (n *NodePattern) Properties(props map[string]any) *NodePattern {
+func (n *NodePattern) Properties(props map[string]sql.Querier) *NodePattern {
 	maps.Copy(n.properties, props)
 	return n
 }
@@ -1708,6 +1708,11 @@ func (n *NodePattern) F(fields ...string) string {
 		b.WriteByte('.').Ident(field)
 	}
 	return b.String()
+}
+
+// L returns a label expression for the node pattern.
+func (n *NodePattern) L() *LabelExpr {
+	return n.labelExpr
 }
 
 // Query returns the node pattern representation.
@@ -1736,7 +1741,7 @@ func (n *NodePattern) Query() (string, []any) {
 				n.WriteString(", ")
 			}
 			n.WriteString(key).WriteString(": ")
-			n.Arg(value)
+			n.Join(value)
 			first = false
 		}
 		n.WriteByte('}')
@@ -1852,18 +1857,16 @@ func (e *EdgePattern) Abbreviated() *EdgePattern {
 	return e
 }
 
-// C returns a formatted string for the table column.
-func (e *EdgePattern) C(column string) string {
+// F returns a formatted string for the field of the edge variable.
+func (e *EdgePattern) F(fields ...string) string {
 	var b Builder
-	if e.variable == "" {
-		return column
+	if e.variable != "" {
+		b.Ident(e.variable)
 	}
-	b.Ident(e.variable).WriteByte('.').Ident(column)
+	for _, field := range fields {
+		b.WriteByte('.').Ident(field)
+	}
 	return b.String()
-}
-
-func (e *EdgePattern) V() string {
-	return e.variable
 }
 
 // Query returns the edge pattern representation.

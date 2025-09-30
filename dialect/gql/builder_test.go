@@ -1,6 +1,7 @@
 package gql
 
 import (
+	"log"
 	"strconv"
 	"testing"
 
@@ -26,17 +27,16 @@ func TestBuilder(t *testing.T) {
 					).
 					Return(
 						Column(account.F()),
-						Column("COUNT(*)").As("num_incoming_transfers"),
+						Column(sql.Count("*")).As("num_incoming_transfers"),
 					).
 					GroupBy(
 						Column(account.F()),
 					).
 					Next().
-					Match(
-						Path().
-							To(account).
-							Via(E().Labels("Owns").LeftDirection()).
-							From(owner),
+					Match(Path().
+						To(account).
+						Via(E().Labels("Owns").LeftDirection()).
+						From(owner),
 					).
 					Return(
 						Column(account.F("id")).As("account_id"),
@@ -239,7 +239,7 @@ func TestBuilder(t *testing.T) {
 		},
 		{
 			input: func() *GraphQuery {
-				p := N().Named("p").Labels("Person").Property("id", 1)
+				p := N().Named("p").Labels("Person").Property("id", Expr("?", 1))
 				a := N().Named("a").Labels("Account")
 				e := E().Named("e").Labels("Transfers")
 				oa := N().Named("oa").Labels("Account")
@@ -287,10 +287,16 @@ func TestBuilder(t *testing.T) {
 		},
 		{
 			input: func() *GraphQuery {
-				singer := NodeTable("Singer")
-				writer := NodeTable("Writer")
-				producer := NodeTable("Producer")
-				p := N().Named("p").LabelExpr(OrL(singer.L(), AndL(NotL(writer.L()), NotL(producer.L()))))
+				p := N().
+					Named("p").
+					LabelExpr(
+						OrL(
+							NodeTable("Singer").L(),
+							AndL(
+								NotL(NodeTable("Writer").L()),
+								NotL(NodeTable("Producer").L())),
+						),
+					)
 				return Graph("FinGraph").
 					Match(p).
 					Return(
@@ -306,6 +312,7 @@ func TestBuilder(t *testing.T) {
 	for i, tt := range tests {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			query, args := tt.input.Query()
+			log.Println(query)
 			require.Equal(t, tt.wantQuery, query)
 			require.Equal(t, tt.wantArgs, args)
 		})
