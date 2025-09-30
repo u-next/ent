@@ -3,6 +3,7 @@ package gql
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 
@@ -334,6 +335,11 @@ func AllColumns() *columnExpr {
 	return &columnExpr{star: true}
 }
 
+// Const creates a new constant column expression.
+func Const(v any) *columnExpr {
+	return &columnExpr{expr: Expr("?", v)}
+}
+
 // Column creates a new column expression.
 func Column(expr string, args ...any) *columnExpr {
 	return &columnExpr{expr: Expr(expr, args...)}
@@ -513,6 +519,17 @@ func (a *assignment) Value(value sql.Querier) *assignment {
 	return a
 }
 
+// F returns the field name of the variable.
+func (a *assignment) F(fields ...string) string {
+	var b Builder
+	b.Ident(a.variable)
+	for _, f := range fields {
+		b.WriteString(".")
+		b.Ident(f)
+	}
+	return b.String()
+}
+
 // LetBuilder is a builder for LET statements.
 type LetBuilder struct {
 	Builder
@@ -537,7 +554,7 @@ func (l *LetBuilder) Query() (string, []any) {
 		if i > 0 {
 			l.Comma().Pad()
 		}
-		l.WriteString(assign.variable)
+		l.Ident(assign.variable)
 		l.WriteString(" = ")
 		l.Join(assign.value)
 	}
@@ -704,7 +721,7 @@ func (f *ForBuilder) WithOffsetAs(name string) *ForBuilder {
 // Query returns the FOR statement representation.
 func (f *ForBuilder) Query() (string, []any) {
 	f.WriteString("FOR ")
-	f.WriteString(f.element)
+	f.Ident(f.element)
 	f.WriteString(" IN ")
 	if f.array != nil {
 		f.Join(f.array)
@@ -713,10 +730,23 @@ func (f *ForBuilder) Query() (string, []any) {
 		f.WriteString(" WITH OFFSET")
 		if f.offset != "offset" {
 			f.WriteString(" AS ")
-			f.WriteString(f.offset)
+			f.Ident(f.offset)
 		}
 	}
 	return f.String(), f.args
+}
+
+// Elem returns the element variable name.
+func (f *ForBuilder) Elem() string {
+	return fmt.Sprintf("`%s`", f.element)
+}
+
+// Offset returns the offset variable name.
+func (f *ForBuilder) Offset() string {
+	if f.offset == "" {
+		f.offset = "offset"
+	}
+	return fmt.Sprintf("`%s`", f.offset)
 }
 
 func (f *ForBuilder) stmt() {}
@@ -1605,15 +1635,31 @@ type NodePattern struct {
 	where      *Predicate
 }
 
-// Node creates a new node pattern builder.
-func Node() *NodePattern {
+type NodeTableBuilder struct {
+	Builder
+	*sql.SelectTable
+}
+
+// NodeTable creates a new node table.
+func NodeTable(name string) *NodeTableBuilder {
+	return &NodeTableBuilder{
+		SelectTable: sql.Table(name),
+	}
+}
+
+func (n *NodeTableBuilder) L() *LabelExpr {
+	return L(n.SelectTable.Name())
+}
+
+// N creates a new node pattern builder.
+func N() *NodePattern {
 	return &NodePattern{
 		properties: make(map[string]any),
 	}
 }
 
-// Variable sets the node variable.
-func (n *NodePattern) Variable(name string) *NodePattern {
+// Named sets the node variable.
+func (n *NodePattern) Named(name string) *NodePattern {
 	n.variable = name
 	return n
 }
@@ -1640,32 +1686,41 @@ func (n *NodePattern) Property(key string, value any) *NodePattern {
 	return n
 }
 
+// Properties adds multiple property filters.
+func (n *NodePattern) Properties(props map[string]any) *NodePattern {
+	maps.Copy(n.properties, props)
+	return n
+}
+
 // Where adds a WHERE condition.
 func (n *NodePattern) Where(condition *Predicate) *NodePattern {
 	n.where = condition
 	return n
 }
 
-// C returns a formatted string for the table column.
-func (n *NodePattern) C(column string) string {
+// F returns a formatted string for the field of the node variable.
+func (n *NodePattern) F(fields ...string) string {
 	var b Builder
-	if n.variable == "" {
-		return column
+	if n.variable != "" {
+		b.Ident(n.variable)
 	}
-	b.Ident(n.variable).WriteByte('.').Ident(column)
+	for _, field := range fields {
+		b.WriteByte('.').Ident(field)
+	}
 	return b.String()
-}
-
-func (n *NodePattern) V() string {
-	return n.variable
 }
 
 // Query returns the node pattern representation.
 func (n *NodePattern) Query() (string, []any) {
+	if n.Len() > 0 || len(n.args) > 0 {
+		n.Reset()
+		n.args = nil
+	}
+
 	n.WriteByte('(')
 
 	if n.variable != "" {
-		n.WriteString(n.variable)
+		n.Ident(n.variable)
 	}
 
 	if n.labelExpr != nil {
@@ -1719,8 +1774,8 @@ type EdgePattern struct {
 	abbreviated bool
 }
 
-// Edge creates a new edge pattern builder.
-func Edge() *EdgePattern {
+// E creates a new edge pattern builder.
+func E() *EdgePattern {
 	return &EdgePattern{
 		direction:  EdgeAnyDirection,
 		properties: make(map[string]any),
@@ -1745,8 +1800,8 @@ func (e *EdgePattern) AnyDirection() *EdgePattern {
 	return e
 }
 
-// Variable sets the edge variable.
-func (e *EdgePattern) Variable(name string) *EdgePattern {
+// Named sets the edge variable.
+func (e *EdgePattern) Named(name string) *EdgePattern {
 	e.variable = name
 	return e
 }
@@ -1770,6 +1825,12 @@ func (e *EdgePattern) LabelExpr(expr *LabelExpr) *EdgePattern {
 // Property adds a property filter.
 func (e *EdgePattern) Property(key string, value any) *EdgePattern {
 	e.properties[key] = value
+	return e
+}
+
+// Properties adds multiple property filters.
+func (e *EdgePattern) Properties(props map[string]any) *EdgePattern {
+	maps.Copy(e.properties, props)
 	return e
 }
 
@@ -1807,6 +1868,11 @@ func (e *EdgePattern) V() string {
 
 // Query returns the edge pattern representation.
 func (e *EdgePattern) Query() (string, []any) {
+	if e.Len() > 0 || len(e.args) > 0 {
+		e.Reset()
+		e.args = nil
+	}
+
 	// Left arrow for left direction
 	if e.direction == EdgeLeft {
 		e.WriteByte('<')
@@ -1819,7 +1885,7 @@ func (e *EdgePattern) Query() (string, []any) {
 		e.WriteByte('[')
 
 		if e.variable != "" {
-			e.WriteString(e.variable)
+			e.Ident(e.variable)
 		}
 
 		if e.labelExpr != nil {
@@ -2105,9 +2171,10 @@ func L(name string) *LabelExpr {
 		fns: []func(*Builder){
 			func(b *Builder) {
 				if name == "" {
-					name = "%" // Wildcard for any label
+					b.WriteByte('%')
+					return
 				}
-				b.WriteString(name)
+				b.Ident(name)
 			},
 		},
 	}

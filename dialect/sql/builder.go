@@ -1651,6 +1651,11 @@ func (s *SelectTable) ref() string {
 	return b.String()
 }
 
+// Name returns the table name.
+func (s *SelectTable) Name() string {
+	return s.name
+}
+
 // implement the table view.
 func (*SelectTable) view() {}
 

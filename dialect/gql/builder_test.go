@@ -15,257 +15,291 @@ func TestBuilder(t *testing.T) {
 		wantArgs  []any
 	}{
 		{
-			input: Graph("FinGraph").
-				Match(
-					Path().
-						From(Node().Labels("Account")).
-						Via(Edge().Labels("Transfers").RightDirection()).
-						To(Node().Variable("account").Labels("Account")),
-				).
-				Return(
-					Column("account"),
-					Column("COUNT(*)").As("num_incoming_transfers"),
-				).
-				GroupBy(
-					Column("account"),
-				).
-				Next().
-				Match(
-					Path().
-						To(Node().Variable("account").Labels("Account")).
-						Via(Edge().Labels("Owns").LeftDirection()).
-						From(Node().Variable("owner").Labels("Person")),
-				).
-				Return(
-					Column("account.id").As("account_id"),
-					Column("owner.name").As("owner_name"),
-					Column("num_incoming_transfers"),
-				),
+			input: func() *GraphQuery {
+				account := N().Named("account").Labels("Account")
+				owner := N().Named("owner").Labels("Person")
+				return Graph("FinGraph").
+					Match(Path().
+						From(N().Labels("Account")).
+						Via(E().Labels("Transfers").RightDirection()).
+						To(account),
+					).
+					Return(
+						Column(account.F()),
+						Column("COUNT(*)").As("num_incoming_transfers"),
+					).
+					GroupBy(
+						Column(account.F()),
+					).
+					Next().
+					Match(
+						Path().
+							To(account).
+							Via(E().Labels("Owns").LeftDirection()).
+							From(owner),
+					).
+					Return(
+						Column(account.F("id")).As("account_id"),
+						Column(owner.F("name")).As("owner_name"),
+						Column("`num_incoming_transfers`"),
+					)
+			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
-				"MATCH (:Account)-[:Transfers]->(account:Account)\n" +
-				"RETURN account, COUNT(*) AS `num_incoming_transfers`\n" +
-				"GROUP BY account\n\n" +
+				"MATCH (:`Account`)-[:`Transfers`]->(`account`:`Account`)\n" +
+				"RETURN `account`, COUNT(*) AS `num_incoming_transfers`\n" +
+				"GROUP BY `account`\n\n" +
 				"NEXT\n\n" +
-				"MATCH (account:Account)<-[:Owns]-(owner:Person)\n" +
-				"RETURN account.id AS `account_id`, owner.name AS `owner_name`, num_incoming_transfers",
+				"MATCH (`account`:`Account`)<-[:`Owns`]-(`owner`:`Person`)\n" +
+				"RETURN `account`.`id` AS `account_id`, `owner`.`name` AS `owner_name`, `num_incoming_transfers`",
 		},
 		{
-			input: Graph("FinGraph").
-				Match(
-					Path().
-						From(Node().Variable("p").Labels("Person")).
-						Via(Edge().Variable("o").Labels("Owns").RightDirection()).
-						To(Node().Variable("a").Labels("Account")),
-				).
-				Filter(
-					NEQ("p.Id", "1"),
-				).
-				Return(
-					Column("p.name"),
-					Column("a.Id").As("account_id"),
-				),
+			input: func() *GraphQuery {
+				p := N().Named("p").Labels("Person")
+				a := N().Named("a").Labels("Account")
+				o := E().Named("o").Labels("Owns")
+				return Graph("FinGraph").
+					Match(Path().
+						From(p).
+						Via(o.RightDirection()).
+						To(a),
+					).
+					Filter(
+						NEQ(p.F("Id"), "1"),
+					).
+					Return(
+						Column(p.F("name")),
+						Column(a.F("Id")).As("account_id"),
+					)
+			}(),
 			wantArgs: []any{"1"},
 			wantQuery: "GRAPH `FinGraph`\n" +
-				"MATCH (p:Person)-[o:Owns]->(a:Account)\n" +
-				"FILTER `p.Id` <> ?\n" +
-				"RETURN p.name, a.Id AS `account_id`",
+				"MATCH (`p`:`Person`)-[`o`:`Owns`]->(`a`:`Account`)\n" +
+				"FILTER `p`.`Id` <> ?\n" +
+				"RETURN `p`.`name`, `a`.`Id` AS `account_id`",
 		},
 		{
-			input: Graph("FinGraph").
-				Match(
-					Path().
-						From(Node().Variable("p").Labels("Person")).
-						Via(Edge().Variable("o").Labels("Owns").RightDirection()).
-						To(Node().Variable("a").Labels("Account")),
-				).
-				For(
-					For("element").In(Expr("[\"all\",\"some\"]")).WithOffset(),
-				).
-				Return(
-					Column("p.Id"),
-					Column("element").As("alert_type"),
-					Column("offset"),
-				).
-				OrderBy(
-					Column("p.Id"),
-					Column("element"),
-					Column("offset"),
-				),
+			input: func() *GraphQuery {
+				p := N().Named("p").Labels("Person")
+				a := N().Named("a").Labels("Account")
+				o := E().Named("o").Labels("Owns")
+				iter := For("element").In(Expr("[\"all\",\"some\"]")).WithOffset()
+				return Graph("FinGraph").
+					Match(
+						Path().
+							From(p).
+							Via(o.RightDirection()).
+							To(a),
+					).
+					For(iter).
+					Return(
+						Column(p.F("Id")),
+						Column(iter.Elem()).As("alert_type"),
+						Column(iter.Offset()),
+					).
+					OrderBy(
+						Column(p.F("Id")),
+						Column(iter.Elem()),
+						Column(iter.Offset()),
+					)
+			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
-				"MATCH (p:Person)-[o:Owns]->(a:Account)\n" +
-				"FOR element IN [\"all\",\"some\"] WITH OFFSET\n" +
-				"RETURN p.Id, element AS `alert_type`, offset\n" +
-				"ORDER BY p.Id, element, offset",
+				"MATCH (`p`:`Person`)-[`o`:`Owns`]->(`a`:`Account`)\n" +
+				"FOR `element` IN [\"all\",\"some\"] WITH OFFSET\n" +
+				"RETURN `p`.`Id`, `element` AS `alert_type`, `offset`\n" +
+				"ORDER BY `p`.`Id`, `element`, `offset`",
 		},
 		{
-			input: Graph("FinGraph").
-				Match(
-					Path().
-						From(Node().Variable("source").Labels("Account")).
-						Via(Edge().Variable("e").Labels("Transfers").RightDirection()).
-						To(Node().Variable("destination").Labels("Account")),
-				).
-				Let(
-					Assign("a", Expr("source")),
-				).
-				Return(
-					Column("a.id").As("a_id"),
-				),
+			input: func() *GraphQuery {
+				source := N().Named("source").Labels("Account")
+				destination := N().Named("destination").Labels("Account")
+				e := E().Named("e").Labels("Transfers")
+				a := Assign("a", Expr(source.F()))
+				return Graph("FinGraph").
+					Match(Path().
+						From(source).
+						Via(e.RightDirection()).
+						To(destination),
+					).
+					Let(a).
+					Return(
+						Column(a.F("id")).As("a_id"),
+					)
+			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
-				"MATCH (source:Account)-[e:Transfers]->(destination:Account)\n" +
-				"LET a = source\n" +
-				"RETURN a.id AS `a_id`",
+				"MATCH (`source`:`Account`)-[`e`:`Transfers`]->(`destination`:`Account`)\n" +
+				"LET `a` = `source`\n" +
+				"RETURN `a`.`id` AS `a_id`",
 		},
 		{
-			input: Graph("FinGraph").
-				Match(
-					Path().
-						From(Node().Variable("source").Labels("Account")).
-						Via(Edge().Variable("e").Labels("Transfers").RightDirection()).
-						To(Node().Variable("destination").Labels("Account")),
-				).
-				OrderBy(
-					Column("source.Id"),
-				).
-				Limit(3).
-				Return(
-					Column("source.Id"),
-					Column("source.nick_name"),
-				),
+			input: func() *GraphQuery {
+				source := N().Named("source").Labels("Account")
+				destination := N().Named("destination").Labels("Account")
+				e := E().Named("e").Labels("Transfers")
+				return Graph("FinGraph").
+					Match(Path().
+						From(source).
+						Via(e.RightDirection()).
+						To(destination),
+					).
+					OrderBy(
+						Column(source.F("Id")),
+					).
+					Limit(3).
+					Return(
+						Column(source.F("Id")),
+						Column(source.F("nick_name")),
+					)
+			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
-				"MATCH (source:Account)-[e:Transfers]->(destination:Account)\n" +
-				"ORDER BY source.Id\n" +
+				"MATCH (`source`:`Account`)-[`e`:`Transfers`]->(`destination`:`Account`)\n" +
+				"ORDER BY `source`.`Id`\n" +
 				"LIMIT 3\n" +
-				"RETURN source.Id, source.nick_name",
+				"RETURN `source`.`Id`, `source`.`nick_name`",
 		},
 		{
-			input: Graph("FinGraph").
-				Match(
-					Node().Variable("p").Labels("Person"),
-				).
-				Offset(2).
-				Return(
-					Column("p.name"),
-					Column("p.id"),
-				),
+			input: func() *GraphQuery {
+				p := N().Named("p").Labels("Person")
+				return Graph("FinGraph").
+					Match(p).
+					Offset(2).
+					Return(
+						Column(p.F("name")),
+						Column(p.F("id")),
+					)
+			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
-				"MATCH (p:Person)\n" +
+				"MATCH (`p`:`Person`)\n" +
 				"OFFSET 2\n" +
-				"RETURN p.name, p.id",
+				"RETURN `p`.`name`, `p`.`id`",
 		},
 		{
-			input: Graph("FinGraph").
-				Match(
-					Node().Variable("p").Labels("Person"),
-				).
-				Return(
-					Column("p.name"),
-					Column("p.id"),
-				).
-				Limit(1).
-				Offset(1),
+			input: func() *GraphQuery {
+				p := N().Named("p").Labels("Person")
+				return Graph("FinGraph").
+					Match(p).
+					Return(
+						Column(p.F("name")),
+						Column(p.F("id")),
+					).
+					Limit(1).
+					Offset(1)
+			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
-				"MATCH (p:Person)\n" +
-				"RETURN p.name, p.id\n" +
+				"MATCH (`p`:`Person`)\n" +
+				"RETURN `p`.`name`, `p`.`id`\n" +
 				"LIMIT 1\n" +
 				"OFFSET 1",
 		},
 		{
-			input: Graph("FinGraph").
-				Match(
-					Path().
-						From(Node().Variable("src").Labels("Account")).
-						Via(Edge().Variable("transfer").Labels("Transfers").RightDirection()).
-						To(Node().Variable("dst").Labels("Account")),
-				).
-				WithDistinct(
-					Column("dst"),
-				).
-				Return(
-					Column("dst.id").As("destination_id"),
-				),
+			input: func() *GraphQuery {
+				src := N().Named("src").Labels("Account")
+				dst := N().Named("dst").Labels("Account")
+				transfer := E().Named("transfer").Labels("Transfers")
+				return Graph("FinGraph").
+					Match(Path().
+						From(src).
+						Via(transfer.RightDirection()).
+						To(dst),
+					).
+					WithDistinct(
+						Column(dst.F()),
+					).
+					Return(
+						Column(dst.F("id")).As("destination_id"),
+					)
+			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
-				"MATCH (src:Account)-[transfer:Transfers]->(dst:Account)\n" +
-				"WITH DISTINCT dst\n" +
-				"RETURN dst.id AS `destination_id`",
+				"MATCH (`src`:`Account`)-[`transfer`:`Transfers`]->(`dst`:`Account`)\n" +
+				"WITH DISTINCT `dst`\n" +
+				"RETURN `dst`.`id` AS `destination_id`",
 		},
 		{
-			input: Graph("FinGraph").
-				Match(
-					Node().Variable("p").Labels("Person"),
-				).
-				Return(
-					Column("p.name"),
-					Column("1").As("group_id"),
-				).
-				UnionAll().
-				Match(
-					Node().Variable("p").Labels("Person"),
-				).
-				Return(
-					Column("2").As("group_id"),
-					Column("p.name"),
-				),
+			input: func() *GraphQuery {
+				p := N().Named("p").Labels("Person")
+				return Graph("FinGraph").
+					Match(p).
+					Return(
+						Column(p.F("name")),
+						Const(1).As("group_id"),
+					).
+					UnionAll().
+					Match(p).
+					Return(
+						Const(2).As("group_id"),
+						Column(p.F("name")),
+					)
+			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
-				"MATCH (p:Person)\n" +
-				"RETURN p.name, 1 AS `group_id`\n" +
+				"MATCH (`p`:`Person`)\n" +
+				"RETURN `p`.`name`, ? AS `group_id`\n" +
 				"UNION ALL\n" +
-				"MATCH (p:Person)\n" +
-				"RETURN 2 AS `group_id`, p.name",
+				"MATCH (`p`:`Person`)\n" +
+				"RETURN ? AS `group_id`, `p`.`name`",
+			wantArgs: []any{1, 2},
 		},
 		{
-			input: Graph("FinGraph").
-				Match(
-					Path().
-						From(Node().Variable("p").Labels("Person").Property("id", 1)).
-						Via(Edge().Labels("Owns").RightDirection()).
-						To(Node().Variable("a").Labels("Account")),
-				).
-				MatchWithHint(
-					Hint{"JOIN_METHOD": "APPLY_JOIN"},
-					Path().
-						From(Node().Variable("a").Labels("Account")).
-						Via(Edge().Variable("e").Labels("Transfers").RightDirection()).
-						To(Node().Variable("oa").Labels("Account")),
-				).
-				Return(
-					Column("oa.id"),
-				),
-			wantArgs: []any{1},
+			input: func() *GraphQuery {
+				p := N().Named("p").Labels("Person").Property("id", 1)
+				a := N().Named("a").Labels("Account")
+				e := E().Named("e").Labels("Transfers")
+				oa := N().Named("oa").Labels("Account")
+				return Graph("FinGraph").
+					Match(Path().
+						From(p).
+						Via(E().Labels("Owns").RightDirection()).
+						To(a),
+					).
+					MatchWithHint(Hint{"JOIN_METHOD": "APPLY_JOIN"}, Path().
+						From(a).
+						Via(e.RightDirection()).
+						To(oa),
+					).
+					Return(
+						Column(oa.F("id")),
+					)
+			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
-				"MATCH (p:Person {id: ?})-[:Owns]->(a:Account)\n" +
-				"MATCH @{JOIN_METHOD=APPLY_JOIN} (a:Account)-[e:Transfers]->(oa:Account)\n" +
-				"RETURN oa.id",
+				"MATCH (`p`:`Person` {id: ?})-[:`Owns`]->(`a`:`Account`)\n" +
+				"MATCH @{JOIN_METHOD=APPLY_JOIN} (`a`:`Account`)-[`e`:`Transfers`]->(`oa`:`Account`)\n" +
+				"RETURN `oa`.`id`",
+			wantArgs: []any{1},
 		},
 		{
-			input: sql.Select("n.name", "n.id").From(
-				GraphTable(
-					Graph("FinGraph").
-						Match(
-							Node().Variable("n").Labels("Person"),
-						).
+			input: func() *sql.Selector {
+				n := N().Named("n").Labels("Person")
+				return sql.Select(
+					n.F("name"),
+					n.F("id"),
+				).From(
+					GraphTable(Graph("FinGraph").
+						Match(n).
 						Return(
-							Column("n"),
+							Column(n.F()),
 						),
-				).As("PersonNames"),
-			),
-			wantQuery: "SELECT `n.name`, `n.id` FROM GRAPH_TABLE(\n" +
+					).As("PersonNames"),
+				)
+			}(),
+			wantQuery: "SELECT `n`.`name`, `n`.`id` FROM GRAPH_TABLE(\n" +
 				"\t`FinGraph`\n" +
-				"\tMATCH (n:Person)\n" +
-				"\tRETURN n\n" +
+				"\tMATCH (`n`:`Person`)\n" +
+				"\tRETURN `n`\n" +
 				") AS `PersonNames`",
 		},
 		{
-			input: Graph("FinGraph").
-				Match(
-					Node().Variable("p").LabelExpr(OrL(L("Singer"), AndL(NotL(L("Writer")), NotL(L("Producer"))))),
-				).
-				Return(
-					Column("p.id"),
-				),
+			input: func() *GraphQuery {
+				singer := NodeTable("Singer")
+				writer := NodeTable("Writer")
+				producer := NodeTable("Producer")
+				p := N().Named("p").LabelExpr(OrL(singer.L(), AndL(NotL(writer.L()), NotL(producer.L()))))
+				return Graph("FinGraph").
+					Match(p).
+					Return(
+						Column(p.F("id")),
+					)
+			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
-				"MATCH (p:Singer|(!Writer&!Producer))\n" +
-				"RETURN p.id",
+				"MATCH (`p`:`Singer`|(!`Writer`&!`Producer`))\n" +
+				"RETURN `p`.`id`",
 		},
 	}
 
