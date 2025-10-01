@@ -1,7 +1,6 @@
-package gql
+package sqlpgq
 
 import (
-	"errors"
 	"fmt"
 	"maps"
 	"strconv"
@@ -9,20 +8,6 @@ import (
 
 	"entgo.io/ent/dialect/sql"
 )
-
-// querierErr allowed propagate sql.Querier's inner error
-type querierErr interface {
-	Err() error
-}
-
-// state wraps all methods for setting and getting
-// update state between all queries in the query tree.
-type state interface {
-	Dialect() string
-	SetDialect(string)
-	Total() int
-	SetTotal(int)
-}
 
 // Statement is a linear query statement.
 type Statement interface {
@@ -32,7 +17,7 @@ type Statement interface {
 
 // GraphQuery is a builder for complete GQL queries.
 type GraphQuery struct {
-	Builder
+	sql.Builder
 	graph string      // property graph name
 	stmts []Statement // linear query statements
 }
@@ -194,14 +179,14 @@ func (g *GraphQuery) Query() (string, []any) {
 		}
 		query, args := stmt.Query()
 		g.WriteString(query)
-		g.args = append(g.args, args...)
+		g.Args(args...)
 	}
-	return g.String(), g.args
+	return g.String(), g.GetArgs()
 }
 
 func (g *GraphQuery) Clone() *GraphQuery {
 	return &GraphQuery{
-		Builder: g.Builder.clone(),
+		Builder: g.Builder.Clone(),
 		graph:   g.graph,
 		stmts:   g.stmts,
 	}
@@ -212,9 +197,9 @@ type Hint map[string]string
 
 // Query returns the hint representation.
 func (h Hint) Query() (string, []any) {
-	var b Builder
+	var b sql.Builder
 	b.WriteString("@")
-	b.WrapBraces(func(b *Builder) {
+	b.WrapBraces(func(b *sql.Builder) {
 		i := 0
 		for k, v := range h {
 			if i > 0 {
@@ -224,12 +209,12 @@ func (h Hint) Query() (string, []any) {
 			i++
 		}
 	})
-	return b.String(), b.args
+	return b.String(), b.GetArgs()
 }
 
 // Matcher is a builder for MATCH statements.
 type Matcher struct {
-	Builder
+	sql.Builder
 	optional bool
 	hint     Hint
 	patterns []Pattern
@@ -276,14 +261,14 @@ func (m *Matcher) Query() (string, []any) {
 			m.Join(p)
 		}
 	}
-	return m.String(), m.args
+	return m.String(), m.GetArgs()
 }
 
 func (m *Matcher) stmt() {}
 
 // FilterBuilder is a builder for FILTER statements.
 type FilterBuilder struct {
-	Builder
+	sql.Builder
 	where     bool
 	predicate *Predicate
 }
@@ -314,14 +299,14 @@ func (f *FilterBuilder) Query() (string, []any) {
 		f.Pad()
 		f.Join(f.predicate)
 	}
-	return f.String(), f.args
+	return f.String(), f.GetArgs()
 }
 
 func (f *FilterBuilder) stmt() {}
 
 // columnExpr represents a single column expression.
 type columnExpr struct {
-	Builder
+	sql.Builder
 	expr    sql.Querier
 	alias   string
 	star    bool
@@ -390,12 +375,12 @@ func (r *columnExpr) Query() (string, []any) {
 			r.WriteString(" ASC")
 		}
 	}
-	return r.String(), r.args
+	return r.String(), r.GetArgs()
 }
 
 // ReturnBuilder is a builder for RETURN statements.
 type ReturnBuilder struct {
-	Builder
+	sql.Builder
 	all      bool
 	distinct bool
 	items    []sql.Querier
@@ -488,7 +473,7 @@ func (r *ReturnBuilder) Query() (string, []any) {
 		r.WriteString(strconv.FormatInt(r.offset, 10))
 	}
 
-	return r.String(), r.args
+	return r.String(), r.GetArgs()
 }
 
 func (r *ReturnBuilder) stmt() {}
@@ -521,7 +506,7 @@ func (a *assignment) Value(value sql.Querier) *assignment {
 
 // F returns the field name of the variable.
 func (a *assignment) F(fields ...string) string {
-	var b Builder
+	var b sql.Builder
 	b.Ident(a.variable)
 	for _, f := range fields {
 		b.WriteString(".")
@@ -532,7 +517,7 @@ func (a *assignment) F(fields ...string) string {
 
 // LetBuilder is a builder for LET statements.
 type LetBuilder struct {
-	Builder
+	sql.Builder
 	assignments []*assignment
 }
 
@@ -558,14 +543,14 @@ func (l *LetBuilder) Query() (string, []any) {
 		l.WriteString(" = ")
 		l.Join(assign.value)
 	}
-	return l.String(), l.args
+	return l.String(), l.GetArgs()
 }
 
 func (l *LetBuilder) stmt() {}
 
 // GroupByBuilder is a builder for GROUP BY statements.
 type GroupByBuilder struct {
-	Builder
+	sql.Builder
 	exprs []sql.Querier
 }
 
@@ -586,14 +571,14 @@ func (g *GroupByBuilder) Append(items ...*columnExpr) *GroupByBuilder {
 func (g *GroupByBuilder) Query() (string, []any) {
 	g.WriteString("GROUP BY ")
 	g.JoinComma(g.exprs...)
-	return g.String(), g.args
+	return g.String(), g.GetArgs()
 }
 
 func (g *GroupByBuilder) stmt() {}
 
 // OrderByBuilder is a builder for ORDER BY statements.
 type OrderByBuilder struct {
-	Builder
+	sql.Builder
 	orders []sql.Querier
 }
 
@@ -614,14 +599,14 @@ func (o *OrderByBuilder) Append(orders ...*columnExpr) *OrderByBuilder {
 func (o *OrderByBuilder) Query() (string, []any) {
 	o.WriteString("ORDER BY ")
 	o.JoinComma(o.orders...)
-	return o.String(), o.args
+	return o.String(), o.GetArgs()
 }
 
 func (o *OrderByBuilder) stmt() {}
 
 // LimitBuilder is a builder for LIMIT statements.
 type LimitBuilder struct {
-	Builder
+	sql.Builder
 	count int64
 }
 
@@ -640,14 +625,14 @@ func (l *LimitBuilder) Count(count int64) *LimitBuilder {
 func (l *LimitBuilder) Query() (string, []any) {
 	l.WriteString("LIMIT ")
 	l.WriteString(strconv.FormatInt(l.count, 10))
-	return l.String(), l.args
+	return l.String(), l.GetArgs()
 }
 
 func (l *LimitBuilder) stmt() {}
 
 // OffsetBuilder is a builder for OFFSET statements.
 type OffsetBuilder struct {
-	Builder
+	sql.Builder
 	skip  bool
 	count int64
 }
@@ -676,14 +661,14 @@ func (o *OffsetBuilder) Query() (string, []any) {
 		o.WriteString("OFFSET ")
 	}
 	o.WriteString(strconv.FormatInt(o.count, 10))
-	return o.String(), o.args
+	return o.String(), o.GetArgs()
 }
 
 func (o *OffsetBuilder) stmt() {}
 
 // ForBuilder is a builder for FOR statements.
 type ForBuilder struct {
-	Builder
+	sql.Builder
 	element string
 	array   sql.Querier
 	offset  string
@@ -733,7 +718,7 @@ func (f *ForBuilder) Query() (string, []any) {
 			f.Ident(f.offset)
 		}
 	}
-	return f.String(), f.args
+	return f.String(), f.GetArgs()
 }
 
 // Elem returns the element variable name.
@@ -753,7 +738,7 @@ func (f *ForBuilder) stmt() {}
 
 // NextBuilder is a builder for NEXT statements.
 type NextBuilder struct {
-	Builder
+	sql.Builder
 }
 
 // Next creates a new NEXT statement builder.
@@ -766,14 +751,14 @@ func (n *NextBuilder) Query() (string, []any) {
 	n.NewLine()
 	n.WriteString("NEXT")
 	n.NewLine()
-	return n.String(), n.args
+	return n.String(), n.GetArgs()
 }
 
 func (n *NextBuilder) stmt() {}
 
 // WithBuilder is a builder for WITH statements.
 type WithBuilder struct {
-	Builder
+	sql.Builder
 	all      bool
 	distinct bool
 	items    []sql.Querier
@@ -828,7 +813,7 @@ func (w *WithBuilder) Query() (string, []any) {
 		w.JoinComma(w.groupBy...)
 	}
 
-	return w.String(), w.args
+	return w.String(), w.GetArgs()
 }
 
 func (w *WithBuilder) stmt() {}
@@ -854,49 +839,49 @@ var setOpStrings = [...]string{
 	SetExceptDistinct:    "EXCEPT DISTINCT",
 }
 
-type SetOperation func(*Builder)
+type SetOperation func(*sql.Builder)
 
 func (s SetOperation) Query() (string, []any) {
-	b := &Builder{}
+	b := &sql.Builder{}
 	s(b)
-	return b.String(), b.args
+	return b.String(), b.GetArgs()
 }
 
 func (s SetOperation) stmt() {}
 
 func UnionAll() SetOperation {
-	return func(b *Builder) {
-		b.WriteSetOp(SetUnionAll)
+	return func(b *sql.Builder) {
+		// b.WriteOp(SetUnionAll)
 	}
 }
 
 func UnionDistinct() SetOperation {
-	return func(b *Builder) {
-		b.WriteSetOp(SetUnionDistinct)
+	return func(b *sql.Builder) {
+		// b.WriteOp(SetUnionDistinct)
 	}
 }
 
 func IntersectAll() SetOperation {
-	return func(b *Builder) {
-		b.WriteSetOp(SetIntersectAll)
+	return func(b *sql.Builder) {
+		// b.WriteOp(SetIntersectAll)
 	}
 }
 
 func IntersectDistinct() SetOperation {
-	return func(b *Builder) {
-		b.WriteSetOp(SetIntersectDistinct)
+	return func(b *sql.Builder) {
+		// b.WriteOp(SetIntersectDistinct)
 	}
 }
 
 func ExceptAll() SetOperation {
-	return func(b *Builder) {
-		b.WriteSetOp(SetExceptAll)
+	return func(b *sql.Builder) {
+		// b.WriteOp(SetExceptAll)
 	}
 }
 
 func ExceptDistinct() SetOperation {
-	return func(b *Builder) {
-		b.WriteSetOp(SetExceptDistinct)
+	return func(b *sql.Builder) {
+		// b.WriteOp(SetExceptDistinct)
 	}
 }
 
@@ -905,16 +890,16 @@ type Queries []sql.Querier
 
 // Query returns query representation of Queriers.
 func (n Queries) Query() (string, []any) {
-	b := &Builder{}
+	b := &sql.Builder{}
 	for i := range n {
 		if i > 0 {
 			b.Pad()
 		}
 		query, args := n[i].Query()
 		b.WriteString(query)
-		b.args = append(b.args, args...)
+		b.Args(args...)
 	}
-	return b.String(), b.args
+	return b.String(), b.GetArgs()
 }
 
 // GraphTableWrapper is a builder for GRAPH_TABLE operator in SQL queries.
@@ -939,7 +924,7 @@ func (g *GraphTableWrapper) As(alias string) *GraphTableWrapper {
 
 // Query returns the GRAPH_TABLE operator representation.
 func (g *GraphTableWrapper) Query() (string, []any) {
-	g.WriteString("GRAPH_TABLE").Wrap(func(b *Builder) {
+	g.WriteString("GRAPH_TABLE ").Wrap(func(b *sql.Builder) {
 		if g.graph != "" {
 			b.NewLine()
 			b.Indent(1).Ident(g.graph)
@@ -949,7 +934,7 @@ func (g *GraphTableWrapper) Query() (string, []any) {
 		for i, stmt := range g.stmts {
 			query, args := stmt.Query()
 			b.Indent(1).WriteString(query)
-			b.args = append(b.args, args...)
+			b.Args(args...)
 			if i >= 0 {
 				b.NewLine()
 			}
@@ -961,131 +946,17 @@ func (g *GraphTableWrapper) Query() (string, []any) {
 		g.Ident(g.alias)
 	}
 
-	return g.String(), g.args
+	return g.String(), g.GetArgs()
 }
 
 func (g *GraphTableWrapper) C(column string) string {
-	if g.isQualified(column) {
+	if g.IsQualified(column) {
 		return column
 	}
 	name := g.alias
-	b := &Builder{}
+	b := &sql.Builder{}
 	b.Ident(name).WriteByte('.').Ident(column)
 	return b.String()
-}
-
-// Builder is the base query builder for the GQL language.
-type Builder struct {
-	sb        *strings.Builder // underlying builder.
-	args      []any            // query parameters.
-	total     int              // total number of parameters in query tree.
-	errs      []error          // errors that added during the query construction.
-	qualifier string           // qualifier to prefix identifiers (e.g. graph name).
-}
-
-// Quote quotes the given identifier for GQL.
-// GQL uses backticks for identifiers that need escaping.
-func (b *Builder) Quote(ident string) string {
-	// GQL identifiers use backticks when they need escaping
-	return "`" + ident + "`"
-}
-
-// Ident appends the given string as an identifier.
-func (b *Builder) Ident(s string) *Builder {
-	switch {
-	case len(s) == 0:
-	case !strings.HasSuffix(s, "*") && !b.isIdent(s) && !isFunc(s) && !isModifier(s) && !isAlias(s):
-		if b.qualifier != "" {
-			b.WriteString(b.Quote(b.qualifier)).WriteByte('.')
-		}
-		b.WriteString(b.Quote(s))
-	default:
-		b.WriteString(s)
-	}
-	return b
-}
-
-// IdentComma calls Ident on all arguments and adds a comma between them.
-func (b *Builder) IdentComma(s ...string) *Builder {
-	for i := range s {
-		if i > 0 {
-			b.Comma()
-		}
-		b.Ident(s[i])
-	}
-	return b
-}
-
-// String returns the accumulated string.
-func (b *Builder) String() string {
-	if b.sb == nil {
-		return ""
-	}
-	return b.sb.String()
-}
-
-// WriteByte wraps the Buffer.WriteByte to make it chainable with other methods.
-func (b *Builder) WriteByte(c byte) *Builder {
-	if b.sb == nil {
-		b.sb = &strings.Builder{}
-	}
-	b.sb.WriteByte(c)
-	return b
-}
-
-// WriteString wraps the Buffer.WriteString to make it chainable with other methods.
-func (b *Builder) WriteString(s string) *Builder {
-	if b.sb == nil {
-		b.sb = &strings.Builder{}
-	}
-	b.sb.WriteString(s)
-	return b
-}
-
-// S is a short version of WriteString.
-func (b *Builder) S(s string) *Builder {
-	return b.WriteString(s)
-}
-
-// Len returns the number of accumulated bytes.
-func (b *Builder) Len() int {
-	if b.sb == nil {
-		return 0
-	}
-	return b.sb.Len()
-}
-
-// Reset resets the Builder to be empty.
-func (b *Builder) Reset() *Builder {
-	if b.sb != nil {
-		b.sb.Reset()
-	}
-	return b
-}
-
-// AddError appends an error to the builder errors.
-func (b *Builder) AddError(err error) *Builder {
-	// allowed nil error make build process easier
-	if err != nil {
-		b.errs = append(b.errs, err)
-	}
-	return b
-}
-
-// Err returns a concatenated error of all errors encountered during
-// the query-building, or were added manually by calling AddError.
-func (b *Builder) Err() error {
-	if len(b.errs) == 0 {
-		return nil
-	}
-	br := strings.Builder{}
-	for i := range b.errs {
-		if i > 0 {
-			br.WriteString("; ")
-		}
-		br.WriteString(b.errs[i].Error())
-	}
-	return errors.New(br.String())
 }
 
 // An Op represents an operator in GQL.
@@ -1157,244 +1028,6 @@ var gqlOps = [...]string{
 	OpIsNotDestination: "IS NOT DESTINATION",
 }
 
-// WriteOp writes an operator to the builder.
-func (b *Builder) WriteOp(op Op) *Builder {
-	switch {
-	case op >= OpEQ && op <= OpLike || op >= OpAdd && op <= OpOr:
-		b.Pad().WriteString(gqlOps[op]).Pad()
-	case op == OpIsNull || op == OpNotNull:
-		b.Pad().WriteString(gqlOps[op])
-	case op == OpNot:
-		b.WriteString(gqlOps[op]).Pad()
-	case op == OpConcat || op == OpGraphOr || op == OpGraphAnd:
-		b.WriteString(gqlOps[op])
-	case op == OpGraphNot:
-		b.WriteString(gqlOps[op])
-	case op >= OpIsLabeled && op <= OpIsNotDestination:
-		b.Pad().WriteString(gqlOps[op]).Pad()
-	default:
-		panic(fmt.Sprintf("invalid op %d", op))
-	}
-	return b
-}
-
-func (b *Builder) WriteSetOp(op SetOp) *Builder {
-	if op < SetUnionAll || op > SetExceptDistinct {
-		panic(fmt.Sprintf("invalid set operation %d", op))
-	}
-	b.WriteString(setOpStrings[op])
-	return b
-}
-
-// Arg appends an input argument to the builder.
-func (b *Builder) Arg(a any) *Builder {
-	switch v := a.(type) {
-	case nil:
-		b.WriteString("NULL")
-		return b
-	case *raw:
-		b.WriteString(v.s)
-		return b
-	case sql.Querier:
-		b.Join(v)
-		return b
-	}
-	// GQL uses ? as placeholder
-	format := "?"
-	return b.Argf(format, a)
-}
-
-// Args appends a list of arguments to the builder.
-func (b *Builder) Args(a ...any) *Builder {
-	for i := range a {
-		if i > 0 {
-			b.Comma()
-		}
-		b.Arg(a[i])
-	}
-	return b
-}
-
-// Argf appends an input argument to the builder
-// with the given format.
-func (b *Builder) Argf(format string, a any) *Builder {
-	switch a := a.(type) {
-	case nil:
-		b.WriteString("NULL")
-		return b
-	case *raw:
-		b.WriteString(a.s)
-		return b
-	case sql.Querier:
-		b.Join(a)
-		return b
-	}
-	b.total++
-	b.args = append(b.args, a)
-	b.WriteString(format)
-	return b
-}
-
-// Comma adds a comma to the query.
-func (b *Builder) Comma() *Builder {
-	return b.WriteString(", ")
-}
-
-// Pad adds a space to the query.
-func (b *Builder) Pad() *Builder {
-	return b.WriteByte(' ')
-}
-
-// Join joins a list of Queries to the builder.
-func (b *Builder) Join(qs ...sql.Querier) *Builder {
-	return b.join(qs, "")
-}
-
-// JoinComma joins a list of Queries and adds comma between them.
-func (b *Builder) JoinComma(qs ...sql.Querier) *Builder {
-	return b.join(qs, ", ")
-}
-
-// join a list of Queries to the builder with a given separator.
-func (b *Builder) join(qs []sql.Querier, sep string) *Builder {
-	for i, q := range qs {
-		if i > 0 {
-			b.WriteString(sep)
-		}
-		st, ok := q.(state)
-		if ok {
-			st.SetDialect(b.Dialect())
-			st.SetTotal(b.total)
-		}
-		query, args := q.Query()
-		b.WriteString(query)
-		b.args = append(b.args, args...)
-		b.total += len(args)
-		if qe, ok := q.(querierErr); ok {
-			if err := qe.Err(); err != nil {
-				b.AddError(err)
-			}
-		}
-	}
-	return b
-}
-
-// Wrap gets a callback, and wraps its result with parentheses.
-func (b *Builder) Wrap(f func(*Builder)) *Builder {
-	nb := &Builder{total: b.total, sb: &strings.Builder{}}
-	nb.WriteByte('(')
-	f(nb)
-	nb.WriteByte(')')
-	b.WriteString(nb.String())
-	b.args = append(b.args, nb.args...)
-	b.total = nb.total
-	return b
-}
-
-// WrapBraces gets a callback, and wraps its result with braces.
-func (b *Builder) WrapBraces(f func(*Builder)) *Builder {
-	nb := &Builder{total: b.total, sb: &strings.Builder{}}
-	nb.WriteByte('{')
-	f(nb)
-	nb.WriteByte('}')
-	b.WriteString(nb.String())
-	b.args = append(b.args, nb.args...)
-	b.total = nb.total
-	return b
-}
-
-// Nested gets a callback, and wraps its result with parentheses.
-//
-// Deprecated: Use Builder.Wrap instead.
-func (b *Builder) Nested(f func(*Builder)) *Builder {
-	return b.Wrap(f)
-}
-
-// Total returns the total number of arguments so far.
-func (b Builder) Total() int {
-	return b.total
-}
-
-// SetTotal sets the value of the total arguments.
-// Used to pass this information between sub queries/expressions.
-func (b *Builder) SetTotal(total int) {
-	b.total = total
-}
-
-// Dialect returns the dialect of the builder.
-func (b Builder) Dialect() string {
-	return "gql"
-}
-
-// SetDialect sets the builder dialect. For GQL it's always "gql".
-func (b *Builder) SetDialect(dialect string) {
-	// GQL dialect is fixed, but we implement the interface
-}
-
-// Query implements the sql.Querier interface.
-func (b Builder) Query() (string, []any) {
-	return b.String(), b.args
-}
-
-// clone returns a shallow clone of a builder.
-func (b Builder) clone() Builder {
-	c := Builder{total: b.total, sb: &strings.Builder{}}
-	if len(b.args) > 0 {
-		c.args = append(c.args, b.args...)
-	}
-	if b.sb != nil {
-		c.sb.WriteString(b.sb.String())
-	}
-	return c
-}
-
-// isIdent reports if the given string is a GQL identifier.
-func (b *Builder) isIdent(s string) bool {
-	return strings.Contains(s, "`")
-}
-
-// unquote database identifiers.
-func (b *Builder) unquote(s string) string {
-	if len(s) >= 2 && s[0] == '`' && s[len(s)-1] == '`' {
-		if u, err := strconv.Unquote(s); err == nil {
-			return u
-		}
-	}
-	return s
-}
-
-// isQualified reports if the given string is a qualified identifier.
-func (b *Builder) isQualified(s string) bool {
-	ident := b.isIdent(s)
-	return !ident && len(s) > 2 && strings.ContainsRune(s[1:len(s)-1], '.') || // <qualifier>.<column>
-		ident && strings.Contains(s, "`.`") // `qualifier`.`column`
-}
-
-// OrPipe adds a pipe separator for GQL OR operations in labels.
-func (b *Builder) OrPipe() *Builder {
-	return b.WriteByte('|')
-}
-
-// NewLine adds a newline character.
-func (b *Builder) NewLine() *Builder {
-	return b.WriteByte('\n')
-}
-
-// Colon adds a colon character.
-func (b *Builder) Colon() *Builder {
-	return b.WriteByte(':')
-}
-
-// Indent adds an indentation (tab character).
-func (b *Builder) Indent(depth int) *Builder {
-	for range depth {
-		b.WriteByte('\t')
-	}
-	return b
-}
-
-// Helper functions for identifier checking
-
 // isFunc reports if the given string is a function call.
 func isFunc(s string) bool {
 	return strings.Contains(s, "(") && strings.Contains(s, ")")
@@ -1423,8 +1056,7 @@ func isAlias(s string) bool {
 	return strings.Contains(s, " AS ") || strings.Contains(s, " as ")
 }
 
-// Pattern builders for MATCH clauses
-
+// Pattern is an interface for graph patterns.
 type Pattern interface {
 	sql.Querier
 	pattern()
@@ -1432,7 +1064,7 @@ type Pattern interface {
 
 // GraphPattern is a builder for graph patterns.
 type GraphPattern struct {
-	Builder
+	sql.Builder
 	pathPatterns []sql.Querier
 	where        *Predicate
 }
@@ -1465,18 +1097,18 @@ func (g *GraphPattern) Query() (string, []any) {
 		g.Join(g.where)
 	}
 
-	return g.String(), g.args
+	return g.String(), g.GetArgs()
 }
 
 func (g *GraphPattern) pattern() {}
 
 // PathPattern is a builder for path patterns.
 type PathPattern struct {
-	Builder
+	sql.Builder
 	variable     string
 	searchPrefix PathSearchPrefix
 	pathMode     PathMode
-	elements     []sql.Querier
+	elements     []Pattern
 	quantifier   *QuantifierBuilder
 }
 
@@ -1485,18 +1117,27 @@ func Path() *PathPattern {
 	return &PathPattern{}
 }
 
+// From adds a starting node to the path pattern.
 func (p *PathPattern) From(node *NodePattern) *PathPattern {
 	p.elements = append(p.elements, node)
 	return p
 }
 
+// To adds an ending node to the path pattern.
 func (p *PathPattern) To(node *NodePattern) *PathPattern {
 	p.elements = append(p.elements, node)
 	return p
 }
 
+// Via adds an edge to the path pattern.
 func (p *PathPattern) Via(edge *EdgePattern) *PathPattern {
 	p.elements = append(p.elements, edge)
+	return p
+}
+
+// Path adds a sub-path to the path pattern.
+func (p *PathPattern) Path(path *PathPattern) *PathPattern {
+	p.elements = append(p.elements, path)
 	return p
 }
 
@@ -1554,12 +1195,6 @@ func (p *PathPattern) Trail() *PathPattern {
 	return p
 }
 
-// Append adds more elements to the path pattern.
-func (p *PathPattern) Append(elements ...sql.Querier) *PathPattern {
-	p.elements = append(p.elements, elements...)
-	return p
-}
-
 // Quantifier sets the quantifier for the path pattern.
 func (p *PathPattern) Quantifier(quantifier *QuantifierBuilder) *PathPattern {
 	p.quantifier = quantifier
@@ -1586,7 +1221,7 @@ func (p *PathPattern) OpenBounded(upperBound int) *PathPattern {
 
 // C returns a formatted string for the table column.
 func (p *PathPattern) C(column string) string {
-	var b Builder
+	var b sql.Builder
 	if p.variable == "" {
 		return column
 	}
@@ -1612,43 +1247,34 @@ func (p *PathPattern) Query() (string, []any) {
 	}
 
 	for _, element := range p.elements {
-		p.Join(element)
+		switch element.(type) {
+		case *PathPattern:
+			p.Wrap(func(b *sql.Builder) {
+				b.Join(element)
+			})
+		default:
+			p.Join(element)
+		}
 	}
 
 	if p.quantifier != nil {
 		quantQuery, quantArgs := p.quantifier.Query()
 		p.WriteString(quantQuery)
-		p.args = append(p.args, quantArgs...)
+		p.Args(quantArgs...)
 	}
 
-	return p.String(), p.args
+	return p.String(), p.GetArgs()
 }
 
 func (p *PathPattern) pattern() {}
 
 // NodePattern is a builder for node patterns.
 type NodePattern struct {
-	Builder
+	sql.Builder
 	variable   string
 	labelExpr  *LabelExpr
 	properties map[string]sql.Querier
 	where      *Predicate
-}
-
-type NodeTableBuilder struct {
-	Builder
-	*sql.SelectTable
-}
-
-// NodeTable creates a new node table.
-func NodeTable(name string) *NodeTableBuilder {
-	return &NodeTableBuilder{
-		SelectTable: sql.Table(name),
-	}
-}
-
-func (n *NodeTableBuilder) L() *LabelExpr {
-	return L(n.SelectTable.Name())
 }
 
 // N creates a new node pattern builder.
@@ -1700,7 +1326,7 @@ func (n *NodePattern) Where(condition *Predicate) *NodePattern {
 
 // F returns a formatted string for the field of the node variable.
 func (n *NodePattern) F(fields ...string) string {
-	var b Builder
+	var b sql.Builder
 	if n.variable != "" {
 		b.Ident(n.variable)
 	}
@@ -1717,9 +1343,9 @@ func (n *NodePattern) L() *LabelExpr {
 
 // Query returns the node pattern representation.
 func (n *NodePattern) Query() (string, []any) {
-	if n.Len() > 0 || len(n.args) > 0 {
+	if n.Len() > 0 || len(n.GetArgs()) > 0 {
 		n.Reset()
-		n.args = nil
+		n.ClearArgs()
 	}
 
 	n.WriteByte('(')
@@ -1753,7 +1379,7 @@ func (n *NodePattern) Query() (string, []any) {
 	}
 
 	n.WriteByte(')')
-	return n.String(), n.args
+	return n.String(), n.GetArgs()
 }
 
 func (n *NodePattern) pattern() {}
@@ -1769,7 +1395,7 @@ const (
 
 // EdgePattern is a builder for edge patterns.
 type EdgePattern struct {
-	Builder
+	sql.Builder
 	direction   EdgeDirection
 	variable    string
 	labelExpr   *LabelExpr
@@ -1859,7 +1485,7 @@ func (e *EdgePattern) Abbreviated() *EdgePattern {
 
 // F returns a formatted string for the field of the edge variable.
 func (e *EdgePattern) F(fields ...string) string {
-	var b Builder
+	var b sql.Builder
 	if e.variable != "" {
 		b.Ident(e.variable)
 	}
@@ -1871,9 +1497,9 @@ func (e *EdgePattern) F(fields ...string) string {
 
 // Query returns the edge pattern representation.
 func (e *EdgePattern) Query() (string, []any) {
-	if e.Len() > 0 || len(e.args) > 0 {
+	if e.Len() > 0 || len(e.GetArgs()) > 0 {
 		e.Reset()
-		e.args = nil
+		e.ClearArgs()
 	}
 
 	// Left arrow for left direction
@@ -1929,115 +1555,10 @@ func (e *EdgePattern) Query() (string, []any) {
 		e.WriteByte('>')
 	}
 
-	return e.String(), e.args
+	return e.String(), e.GetArgs()
 }
 
 func (e *EdgePattern) pattern() {}
-
-// SubpathPatternBuilder is a builder for subpath patterns.
-type SubpathPatternBuilder struct {
-	Builder
-	elements   []sql.Querier
-	where      sql.Querier
-	quantifier *QuantifierBuilder
-	pathMode   PathMode
-}
-
-// Subpath creates a new subpath pattern builder.
-func Subpath() *SubpathPatternBuilder {
-	return &SubpathPatternBuilder{}
-}
-
-// AddElement adds an element pattern to the subpath.
-func (s *SubpathPatternBuilder) AddElement(element sql.Querier) *SubpathPatternBuilder {
-	s.elements = append(s.elements, element)
-	return s
-}
-
-// Where adds a WHERE condition to the subpath.
-func (s *SubpathPatternBuilder) Where(condition sql.Querier) *SubpathPatternBuilder {
-	s.where = condition
-	return s
-}
-
-// Quantifier sets the quantifier for the subpath pattern.
-func (s *SubpathPatternBuilder) Quantifier(quantifier *QuantifierBuilder) *SubpathPatternBuilder {
-	s.quantifier = quantifier
-	return s
-}
-
-// Fixed sets a fixed quantifier {n} for the subpath pattern.
-func (s *SubpathPatternBuilder) Fixed(bound int) *SubpathPatternBuilder {
-	s.quantifier = NewFixedQuantifier(bound)
-	return s
-}
-
-// Bounded sets a bounded quantifier {min,max} for the subpath pattern.
-func (s *SubpathPatternBuilder) Bounded(lowerBound, upperBound int) *SubpathPatternBuilder {
-	s.quantifier = NewBoundedQuantifier(lowerBound, upperBound)
-	return s
-}
-
-// OpenBounded sets an open bounded quantifier {,max} for the subpath pattern.
-func (s *SubpathPatternBuilder) OpenBounded(upperBound int) *SubpathPatternBuilder {
-	s.quantifier = NewOpenBoundedQuantifier(upperBound)
-	return s
-}
-
-// Mode sets the path mode for the subpath.
-func (s *SubpathPatternBuilder) Mode(mode PathMode) *SubpathPatternBuilder {
-	s.pathMode = mode
-	return s
-}
-
-// Walk sets the path mode to WALK for the subpath.
-func (s *SubpathPatternBuilder) Walk() *SubpathPatternBuilder {
-	s.pathMode = ModeWalk
-	return s
-}
-
-// Acyclic sets the path mode to ACYCLIC for the subpath.
-func (s *SubpathPatternBuilder) Acyclic() *SubpathPatternBuilder {
-	s.pathMode = ModeAcyclic
-	return s
-}
-
-// Trail sets the path mode to TRAIL for the subpath.
-func (s *SubpathPatternBuilder) Trail() *SubpathPatternBuilder {
-	s.pathMode = ModeTrail
-	return s
-}
-
-// Query returns the subpath pattern representation.
-func (s *SubpathPatternBuilder) Query() (string, []any) {
-	s.WriteByte('(')
-
-	// Path mode for subpath
-	if s.pathMode != ModeWalk {
-		s.WriteString(pathModes[s.pathMode]).Pad()
-	}
-
-	for _, element := range s.elements {
-		s.Join(element)
-	}
-
-	if s.where != nil {
-		s.WriteString(" WHERE ")
-		s.Join(s.where)
-	}
-
-	s.WriteByte(')')
-
-	if s.quantifier != nil {
-		quantQuery, quantArgs := s.quantifier.Query()
-		s.WriteString(quantQuery)
-		s.args = append(s.args, quantArgs...)
-	}
-
-	return s.String(), s.args
-}
-
-func (s *SubpathPatternBuilder) pattern() {}
 
 // QuantifierType represents different quantifier types.
 type QuantifierType int
@@ -2049,7 +1570,7 @@ const (
 
 // QuantifierBuilder is a builder for path quantifiers.
 type QuantifierBuilder struct {
-	Builder
+	sql.Builder
 	quantifierType QuantifierType
 	bound          int
 	lowerBound     int
@@ -2084,7 +1605,7 @@ func NewOpenBoundedQuantifier(upperBound int) *QuantifierBuilder {
 
 // Query returns the quantifier representation.
 func (q *QuantifierBuilder) Query() (string, []any) {
-	q.WrapBraces(func(b *Builder) {
+	q.WrapBraces(func(b *sql.Builder) {
 		switch q.quantifierType {
 		case QuantifierFixed:
 			b.WriteString(strconv.Itoa(q.bound))
@@ -2099,12 +1620,12 @@ func (q *QuantifierBuilder) Query() (string, []any) {
 		}
 	})
 
-	return q.String(), q.args
+	return q.String(), q.GetArgs()
 }
 
 // QuantifiedPatternBuilder is a builder for quantified path patterns.
 type QuantifiedPatternBuilder struct {
-	Builder
+	sql.Builder
 	ptn        sql.Querier
 	quantifier *QuantifierBuilder
 }
@@ -2153,26 +1674,26 @@ func (q *QuantifiedPatternBuilder) Query() (string, []any) {
 	if q.quantifier != nil {
 		quantQuery, quantArgs := q.quantifier.Query()
 		q.WriteString(quantQuery)
-		q.args = append(q.args, quantArgs...)
+		q.Args(quantArgs...)
 	}
 
-	return q.String(), q.args
+	return q.String(), q.GetArgs()
 }
 
 func (q *QuantifiedPatternBuilder) pattern() {}
 
 // LabelExpr is a builder for complex label expressions.
 type LabelExpr struct {
-	Builder
+	sql.Builder
 	depth int
-	fns   []func(*Builder)
+	fns   []func(*sql.Builder)
 }
 
 // L creates a new label expression with the given label name.
 func L(name string) *LabelExpr {
 	return &LabelExpr{
-		fns: []func(*Builder){
-			func(b *Builder) {
+		fns: []func(*sql.Builder){
+			func(b *sql.Builder) {
 				if name == "" {
 					b.WriteByte('%')
 					return
@@ -2185,22 +1706,22 @@ func L(name string) *LabelExpr {
 
 func AndL(labels ...*LabelExpr) *LabelExpr {
 	l := &LabelExpr{}
-	return l.Append(func(b *Builder) {
-		l.mayWrap(labels, b, OpGraphAnd)
+	return l.Append(func(b *sql.Builder) {
+		l.mayWrap(labels, b, '&')
 	})
 }
 
 func OrL(labels ...*LabelExpr) *LabelExpr {
 	l := &LabelExpr{}
-	return l.Append(func(b *Builder) {
-		l.mayWrap(labels, b, OpGraphOr)
+	return l.Append(func(b *sql.Builder) {
+		l.mayWrap(labels, b, '|')
 	})
 }
 
 func NotL(label *LabelExpr) *LabelExpr {
 	l := &LabelExpr{}
-	return l.Append(func(b *Builder) {
-		b.WriteOp(OpGraphNot)
+	return l.Append(func(b *sql.Builder) {
+		b.WriteByte('!')
 		if len(label.fns) > 1 && l.depth != 0 {
 			b.WriteByte('(')
 			b.Join(label)
@@ -2212,12 +1733,12 @@ func NotL(label *LabelExpr) *LabelExpr {
 }
 
 // Append adds a function to the label expression builder.
-func (l *LabelExpr) Append(fns ...func(*Builder)) *LabelExpr {
+func (l *LabelExpr) Append(fns ...func(*sql.Builder)) *LabelExpr {
 	l.fns = append(l.fns, fns...)
 	return l
 }
 
-func (l *LabelExpr) mayWrap(exprs []*LabelExpr, b *Builder, op Op) {
+func (l *LabelExpr) mayWrap(exprs []*LabelExpr, b *sql.Builder, op byte) {
 	switch n := len(exprs); {
 	case n == 1:
 		b.Join(exprs[0])
@@ -2229,10 +1750,10 @@ func (l *LabelExpr) mayWrap(exprs []*LabelExpr, b *Builder, op Op) {
 	for i := range exprs {
 		exprs[i].depth = l.depth + 1
 		if i > 0 {
-			b.WriteOp(op)
+			b.WriteByte(op)
 		}
 		if len(exprs[i].fns) > 1 {
-			b.Wrap(func(b *Builder) {
+			b.Wrap(func(b *sql.Builder) {
 				b.Join(exprs[i])
 			})
 		} else {
@@ -2243,14 +1764,14 @@ func (l *LabelExpr) mayWrap(exprs []*LabelExpr, b *Builder, op Op) {
 
 // String returns the label expression representation.
 func (l *LabelExpr) Query() (string, []any) {
-	if l.Len() > 0 || len(l.args) > 0 {
+	if l.Len() > 0 || len(l.GetArgs()) > 0 {
 		l.Reset()
-		l.args = nil
+		l.ClearArgs()
 	}
 	for _, f := range l.fns {
 		f(&l.Builder)
 	}
-	return l.String(), l.args
+	return l.String(), l.GetArgs()
 }
 
 // PathSearchPrefix represents path search prefix types.
@@ -2285,20 +1806,20 @@ var pathModes = [...]string{
 
 // Predicate represents a GQL predicate expression.
 type Predicate struct {
-	Builder
+	sql.Builder
 	depth int
-	fns   []func(*Builder)
+	fns   []func(*sql.Builder)
 }
 
 // P creates a new GQL predicate.
-func P(fns ...func(*Builder)) *Predicate {
+func P(fns ...func(*sql.Builder)) *Predicate {
 	return &Predicate{fns: fns}
 }
 
 // Raw allows injecting raw GQL expressions in the predicate.
 func (p *Predicate) Raw(query string, args ...any) *Predicate {
 	p.WriteString(query)
-	p.args = append(p.args, args...)
+	p.Args(args...)
 	return p
 }
 
@@ -2316,10 +1837,10 @@ func (p *Predicate) Or() *Predicate {
 
 // Not wraps the predicate with the NOT operator.
 func (p *Predicate) Not() *Predicate {
-	p.Wrap(func(b *Builder) {
+	p.Wrap(func(b *sql.Builder) {
 		b.WriteString("NOT ")
 		b.WriteString(p.String())
-		b.args = append(b.args, p.args...)
+		b.Args(p.GetArgs()...)
 	})
 	return p
 }
@@ -2328,43 +1849,43 @@ func (p *Predicate) Not() *Predicate {
 
 // EQ adds a "=" predicate.
 func (p *Predicate) EQ(column string, arg any) *Predicate {
-	return p.Append(func(b *Builder) {
-		b.Ident(column).WriteOp(OpEQ).Arg(arg)
+	return p.Append(func(b *sql.Builder) {
+		b.Ident(column).WriteOp(sql.OpEQ).Arg(arg)
 	})
 }
 
 // NEQ adds a "<>" predicate.
 func (p *Predicate) NEQ(column string, arg any) *Predicate {
-	return p.Append(func(b *Builder) {
-		b.Ident(column).WriteOp(OpNEQ).Arg(arg)
+	return p.Append(func(b *sql.Builder) {
+		b.Ident(column).WriteOp(sql.OpNEQ).Arg(arg)
 	})
 }
 
 // GT adds a ">" predicate.
 func (p *Predicate) GT(column string, arg any) *Predicate {
-	return p.Append(func(b *Builder) {
-		b.Ident(column).WriteOp(OpGT).Arg(arg)
+	return p.Append(func(b *sql.Builder) {
+		b.Ident(column).WriteOp(sql.OpGT).Arg(arg)
 	})
 }
 
 // GTE adds a ">=" predicate.
 func (p *Predicate) GTE(column string, arg any) *Predicate {
-	return p.Append(func(b *Builder) {
-		b.Ident(column).WriteOp(OpGTE).Arg(arg)
+	return p.Append(func(b *sql.Builder) {
+		b.Ident(column).WriteOp(sql.OpGTE).Arg(arg)
 	})
 }
 
 // LT adds a "<" predicate.
 func (p *Predicate) LT(column string, arg any) *Predicate {
-	return p.Append(func(b *Builder) {
-		b.Ident(column).WriteOp(OpLT).Arg(arg)
+	return p.Append(func(b *sql.Builder) {
+		b.Ident(column).WriteOp(sql.OpLT).Arg(arg)
 	})
 }
 
 // LTE adds a "<=" predicate.
 func (p *Predicate) LTE(column string, arg any) *Predicate {
-	return p.Append(func(b *Builder) {
-		b.Ident(column).WriteOp(OpLTE).Arg(arg)
+	return p.Append(func(b *sql.Builder) {
+		b.Ident(column).WriteOp(sql.OpLTE).Arg(arg)
 	})
 }
 
@@ -2375,9 +1896,9 @@ func (p *Predicate) In(column string, args ...any) *Predicate {
 	if len(args) == 0 {
 		return p.False()
 	}
-	return p.Append(func(b *Builder) {
-		b.Ident(column).WriteOp(OpIn)
-		b.Wrap(func(b *Builder) {
+	return p.Append(func(b *sql.Builder) {
+		b.Ident(column).WriteOp(sql.OpIn)
+		b.Wrap(func(b *sql.Builder) {
 			if s, ok := args[0].(*sql.Selector); ok {
 				b.Join(s)
 			} else {
@@ -2394,9 +1915,9 @@ func (p *Predicate) NotIn(column string, args ...any) *Predicate {
 	if len(args) == 0 {
 		return Not(p.False())
 	}
-	return p.Append(func(b *Builder) {
-		b.Ident(column).WriteOp(OpNotIn)
-		b.Wrap(func(b *Builder) {
+	return p.Append(func(b *sql.Builder) {
+		b.Ident(column).WriteOp(sql.OpNotIn)
+		b.Wrap(func(b *sql.Builder) {
 			if s, ok := args[0].(*sql.Selector); ok {
 				b.Join(s)
 			} else {
@@ -2408,22 +1929,22 @@ func (p *Predicate) NotIn(column string, args ...any) *Predicate {
 
 // Like adds a "LIKE" predicate.
 func (p *Predicate) Like(column, pattern string) *Predicate {
-	return p.Append(func(b *Builder) {
-		b.Ident(column).WriteOp(OpLike).Arg(pattern)
+	return p.Append(func(b *sql.Builder) {
+		b.Ident(column).WriteOp(sql.OpLike).Arg(pattern)
 	})
 }
 
 // IsNull adds an "IS NULL" predicate.
 func (p *Predicate) IsNull(column string) *Predicate {
-	return p.Append(func(b *Builder) {
-		b.Ident(column).WriteOp(OpIsNull)
+	return p.Append(func(b *sql.Builder) {
+		b.Ident(column).WriteOp(sql.OpIsNull)
 	})
 }
 
 // NotNull adds an "IS NOT NULL" predicate.
 func (p *Predicate) NotNull(column string) *Predicate {
-	return p.Append(func(b *Builder) {
-		b.Ident(column).WriteOp(OpNotNull)
+	return p.Append(func(b *sql.Builder) {
+		b.Ident(column).WriteOp(sql.OpNotNull)
 	})
 }
 
@@ -2431,8 +1952,8 @@ func (p *Predicate) NotNull(column string) *Predicate {
 
 // IsLabeled adds an "IS LABELED" predicate.
 func (p *Predicate) IsLabeled(element string, labelExpr *LabelExpr) *Predicate {
-	return p.Append(func(b *Builder) {
-		b.WriteString(element).WriteOp(OpIsLabeled)
+	return p.Append(func(b *sql.Builder) {
+		b.WriteString(element).WriteString(" IS LABELED ")
 		if labelExpr != nil {
 			b.Join(labelExpr)
 		}
@@ -2441,8 +1962,8 @@ func (p *Predicate) IsLabeled(element string, labelExpr *LabelExpr) *Predicate {
 
 // IsNotLabeled adds an "IS NOT LABELED" predicate.
 func (p *Predicate) IsNotLabeled(element string, labelExpr *LabelExpr) *Predicate {
-	return p.Append(func(b *Builder) {
-		b.WriteString(element).WriteOp(OpIsNotLabeled)
+	return p.Append(func(b *sql.Builder) {
+		b.WriteString(element).WriteString(" IS NOT LABELED ")
 		if labelExpr != nil {
 			b.Join(labelExpr)
 		}
@@ -2451,8 +1972,8 @@ func (p *Predicate) IsNotLabeled(element string, labelExpr *LabelExpr) *Predicat
 
 // IsSource adds an "IS SOURCE" predicate.
 func (p *Predicate) IsSource(node, edge string) *Predicate {
-	return p.Append(func(b *Builder) {
-		b.WriteString(node).WriteOp(OpIsSource)
+	return p.Append(func(b *sql.Builder) {
+		b.WriteString(node).WriteString(" IS SOURCE ")
 		if edge != "" {
 			b.WriteString("OF ").WriteString(edge)
 		}
@@ -2461,8 +1982,8 @@ func (p *Predicate) IsSource(node, edge string) *Predicate {
 
 // IsNotSource adds an "IS NOT SOURCE" predicate.
 func (p *Predicate) IsNotSource(node, edge string) *Predicate {
-	return p.Append(func(b *Builder) {
-		b.WriteString(node).WriteOp(OpIsNotSource)
+	return p.Append(func(b *sql.Builder) {
+		b.WriteString(node).WriteString(" IS NOT SOURCE ")
 		if edge != "" {
 			b.WriteString("OF ").WriteString(edge)
 		}
@@ -2471,8 +1992,8 @@ func (p *Predicate) IsNotSource(node, edge string) *Predicate {
 
 // IsDestination adds an "IS DESTINATION" predicate.
 func (p *Predicate) IsDestination(node, edge string) *Predicate {
-	return p.Append(func(b *Builder) {
-		b.WriteString(node).WriteOp(OpIsDestination)
+	return p.Append(func(b *sql.Builder) {
+		b.WriteString(node).WriteString(" IS DESTINATION ")
 		if edge != "" {
 			b.WriteString("OF ").WriteString(edge)
 		}
@@ -2481,8 +2002,8 @@ func (p *Predicate) IsDestination(node, edge string) *Predicate {
 
 // IsNotDestination adds an "IS NOT DESTINATION" predicate.
 func (p *Predicate) IsNotDestination(node, edge string) *Predicate {
-	return p.Append(func(b *Builder) {
-		b.WriteString(node).WriteOp(OpIsNotDestination)
+	return p.Append(func(b *sql.Builder) {
+		b.WriteString(node).WriteString(" IS NOT DESTINATION ")
 		if edge != "" {
 			b.WriteString("OF ").WriteString(edge)
 		}
@@ -2493,7 +2014,7 @@ func (p *Predicate) IsNotDestination(node, edge string) *Predicate {
 
 // AllDifferent adds an "ALL_DIFFERENT" predicate.
 func (p *Predicate) AllDifferent(elements ...string) *Predicate {
-	return p.Append(func(b *Builder) {
+	return p.Append(func(b *sql.Builder) {
 		b.WriteString("ALL_DIFFERENT(")
 		for i, element := range elements {
 			if i > 0 {
@@ -2507,7 +2028,7 @@ func (p *Predicate) AllDifferent(elements ...string) *Predicate {
 
 // Same adds a "SAME" predicate.
 func (p *Predicate) Same(elements ...string) *Predicate {
-	return p.Append(func(b *Builder) {
+	return p.Append(func(b *sql.Builder) {
 		b.WriteString("SAME(")
 		for i, element := range elements {
 			if i > 0 {
@@ -2521,7 +2042,7 @@ func (p *Predicate) Same(elements ...string) *Predicate {
 
 // PropertyExists adds a "PROPERTY_EXISTS" predicate.
 func (p *Predicate) PropertyExists(element, property string) *Predicate {
-	return p.Append(func(b *Builder) {
+	return p.Append(func(b *sql.Builder) {
 		b.WriteString("PROPERTY_EXISTS(").WriteString(element).Comma().WriteString(property).WriteByte(')')
 	})
 }
@@ -2586,7 +2107,7 @@ func NotNull(column string) *Predicate {
 // And combines all given predicates with AND between them.
 func And(preds ...*Predicate) *Predicate {
 	p := P()
-	return p.Append(func(b *Builder) {
+	return p.Append(func(b *sql.Builder) {
 		p.mayWrap(preds, b, "AND")
 	})
 }
@@ -2594,15 +2115,15 @@ func And(preds ...*Predicate) *Predicate {
 // Or combines all given predicates with OR between them.
 func Or(preds ...*Predicate) *Predicate {
 	p := P()
-	return p.Append(func(b *Builder) {
+	return p.Append(func(b *sql.Builder) {
 		p.mayWrap(preds, b, "OR")
 	})
 }
 
 // Not wraps the given predicate with the NOT operator.
 func Not(pred *Predicate) *Predicate {
-	return P().Not().Append(func(b *Builder) {
-		b.Wrap(func(b *Builder) {
+	return P().Not().Append(func(b *sql.Builder) {
+		b.Wrap(func(b *sql.Builder) {
 			b.Join(pred)
 		})
 	})
@@ -2615,7 +2136,7 @@ func False() *Predicate {
 
 // False appends FALSE to the predicate.
 func (p *Predicate) False() *Predicate {
-	return p.Append(func(b *Builder) {
+	return p.Append(func(b *sql.Builder) {
 		b.WriteString("FALSE")
 	})
 }
@@ -2627,14 +2148,14 @@ func True() *Predicate {
 
 // True appends TRUE to the predicate.
 func (p *Predicate) True() *Predicate {
-	return p.Append(func(b *Builder) {
+	return p.Append(func(b *sql.Builder) {
 		b.WriteString("TRUE")
 	})
 }
 
 // ExprP creates a new predicate from the given expression.
 func ExprP(expr string, args ...any) *Predicate {
-	return P(func(b *Builder) {
+	return P(func(b *sql.Builder) {
 		b.Join(Expr(expr, args...))
 	})
 }
@@ -2646,9 +2167,9 @@ func Exists(query sql.Querier) *Predicate {
 
 // Exists appends the EXISTS predicate with the given query.
 func (p *Predicate) Exists(query sql.Querier) *Predicate {
-	return p.Append(func(b *Builder) {
+	return p.Append(func(b *sql.Builder) {
 		b.WriteString("EXISTS ")
-		b.WrapBraces(func(b *Builder) {
+		b.WrapBraces(func(b *sql.Builder) {
 			b.Join(query)
 		})
 	})
@@ -2656,8 +2177,8 @@ func (p *Predicate) Exists(query sql.Querier) *Predicate {
 
 // InSubquery adds an "IN" predicate with a subquery.
 func (p *Predicate) InSubquery(value string, query sql.Querier) *Predicate {
-	p.Ident(value).WriteOp(OpIn)
-	p.WrapBraces(func(b *Builder) {
+	p.Ident(value).WriteOp(sql.OpIn)
+	p.WrapBraces(func(b *sql.Builder) {
 		b.Join(query)
 	})
 	return p
@@ -2665,8 +2186,8 @@ func (p *Predicate) InSubquery(value string, query sql.Querier) *Predicate {
 
 // NotInSubquery adds a "NOT IN" predicate with a subquery.
 func (p *Predicate) NotInSubquery(value string, query sql.Querier) *Predicate {
-	p.Ident(value).WriteOp(OpNotIn)
-	p.WrapBraces(func(b *Builder) {
+	p.Ident(value).WriteOp(sql.OpNotIn)
+	p.WrapBraces(func(b *sql.Builder) {
 		b.Join(query)
 	})
 	return p
@@ -2689,9 +2210,9 @@ func NotInSubquery(value string, query sql.Querier) *Predicate {
 
 // NotExists appends the NOT EXISTS predicate with the given query.
 func (p *Predicate) NotExists(query sql.Querier) *Predicate {
-	return p.Append(func(b *Builder) {
+	return p.Append(func(b *sql.Builder) {
 		b.WriteString("NOT EXISTS ")
-		b.Wrap(func(b *Builder) {
+		b.Wrap(func(b *sql.Builder) {
 			b.Join(query)
 		})
 	})
@@ -2699,7 +2220,7 @@ func (p *Predicate) NotExists(query sql.Querier) *Predicate {
 
 // Append appends a new function to the predicate callbacks.
 // The callback list are executed on call to Query.
-func (p *Predicate) Append(f func(*Builder)) *Predicate {
+func (p *Predicate) Append(f func(*sql.Builder)) *Predicate {
 	p.fns = append(p.fns, f)
 	return p
 }
@@ -2709,10 +2230,10 @@ func (p *Predicate) clone() *Predicate {
 	if p == nil {
 		return p
 	}
-	return &Predicate{fns: append([]func(*Builder){}, p.fns...)}
+	return &Predicate{fns: append([]func(*sql.Builder){}, p.fns...)}
 }
 
-func (p *Predicate) mayWrap(preds []*Predicate, b *Builder, op string) {
+func (p *Predicate) mayWrap(preds []*Predicate, b *sql.Builder, op string) {
 	switch n := len(preds); {
 	case n == 1:
 		b.Join(preds[0])
@@ -2729,7 +2250,7 @@ func (p *Predicate) mayWrap(preds []*Predicate, b *Builder, op string) {
 			b.WriteByte(' ')
 		}
 		if len(preds[i].fns) > 1 {
-			b.Wrap(func(b *Builder) {
+			b.Wrap(func(b *sql.Builder) {
 				b.Join(preds[i])
 			})
 		} else {
@@ -2740,22 +2261,22 @@ func (p *Predicate) mayWrap(preds []*Predicate, b *Builder, op string) {
 
 // Query returns query representation of a predicate.
 func (p *Predicate) Query() (string, []any) {
-	if p.Len() > 0 || len(p.args) > 0 {
+	if p.Len() > 0 || len(p.GetArgs()) > 0 {
 		p.Reset()
-		p.args = nil
+		p.ClearArgs()
 	}
 	for _, f := range p.fns {
 		f(&p.Builder)
 	}
-	return p.String(), p.args
+	return p.String(), p.GetArgs()
 }
 
 // arg calls Builder.Arg, but wraps complex queries with parens when needed.
-func (*Predicate) arg(b *Builder, a any) {
+func (*Predicate) arg(b *sql.Builder, a any) {
 	switch a.(type) {
 	case *GraphQuery, *Matcher, *FilterBuilder, *ReturnBuilder:
 		// Wrap complex query types in parentheses
-		b.Wrap(func(b *Builder) {
+		b.Wrap(func(b *sql.Builder) {
 			b.Arg(a)
 		})
 	default:
@@ -2828,24 +2349,24 @@ type expr struct {
 func (e *expr) Query() (string, []any) { return e.s, e.args }
 
 // ExprFunc returns an expression function that implements the sql.Querier interface.
-func ExprFunc(fn func(*Builder)) sql.Querier {
+func ExprFunc(fn func(*sql.Builder)) sql.Querier {
 	return &exprFunc{fn: fn}
 }
 
 type exprFunc struct {
-	Builder
-	fn func(*Builder)
+	sql.Builder
+	fn func(*sql.Builder)
 }
 
 func (e *exprFunc) Query() (string, []any) {
-	b := e.Builder.clone()
+	b := e.Builder.Clone()
 	e.fn(&b)
 	return b.Query()
 }
 
 // FuncBuilder is a builder for GQL functions.
 type FuncBuilder struct {
-	Builder
+	sql.Builder
 	name string
 	args []any
 }
@@ -2867,7 +2388,7 @@ func (f *FuncBuilder) Query() (string, []any) {
 	f.WriteByte('(')
 	f.Args(f.args...)
 	f.WriteByte(')')
-	return f.String(), f.args
+	return f.String(), f.GetArgs()
 }
 
 // DestinationNodeID returns a new DESTINATION_NODE_ID function builder.
@@ -2942,7 +2463,7 @@ func SourceNodeID(edge any) *FuncBuilder {
 
 // ArraySubqueryBuilder is a builder for ARRAY subqueries.
 type ArraySubqueryBuilder struct {
-	Builder
+	sql.Builder
 	query sql.Querier
 }
 
@@ -2954,15 +2475,15 @@ func ArraySubquery(query sql.Querier) *ArraySubqueryBuilder {
 // Query returns the ARRAY subquery representation.
 func (a *ArraySubqueryBuilder) Query() (string, []any) {
 	a.WriteString("ARRAY ")
-	a.WrapBraces(func(b *Builder) {
+	a.WrapBraces(func(b *sql.Builder) {
 		b.Join(a.query)
 	})
-	return a.String(), a.args
+	return a.String(), a.GetArgs()
 }
 
 // ValueSubqueryBuilder is a builder for VALUE subqueries.
 type ValueSubqueryBuilder struct {
-	Builder
+	sql.Builder
 	query sql.Querier
 }
 
@@ -2974,8 +2495,8 @@ func ValueSubquery(query sql.Querier) *ValueSubqueryBuilder {
 // Query returns the VALUE subquery representation.
 func (v *ValueSubqueryBuilder) Query() (string, []any) {
 	v.WriteString("VALUE ")
-	v.WrapBraces(func(b *Builder) {
+	v.WrapBraces(func(b *sql.Builder) {
 		b.Join(v.query)
 	})
-	return v.String(), v.args
+	return v.String(), v.GetArgs()
 }

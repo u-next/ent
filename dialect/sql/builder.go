@@ -441,7 +441,7 @@ func (i *InsertBuilder) Query() (string, []any) {
 // QueryErr returns query representation of an `INSERT INTO`
 // statement and any error occurred in building the statement.
 func (i *InsertBuilder) QueryErr() (string, []any, error) {
-	b := i.Builder.clone()
+	b := i.Builder.Clone()
 	b.WriteString("INSERT INTO ")
 	b.writeSchema(i.schema)
 	b.Ident(i.table).Pad()
@@ -604,7 +604,7 @@ func (u *UpdateBuilder) Empty() bool {
 // OrderBy appends the `ORDER BY` clause to the `UPDATE` statement.
 // Supported by SQLite and MySQL.
 func (u *UpdateBuilder) OrderBy(columns ...string) *UpdateBuilder {
-	if u.postgres() {
+	if u.Postgres() {
 		u.AddError(errors.New("ORDER BY is not supported by PostgreSQL"))
 		return u
 	}
@@ -617,7 +617,7 @@ func (u *UpdateBuilder) OrderBy(columns ...string) *UpdateBuilder {
 // Limit appends the `LIMIT` clause to the `UPDATE` statement.
 // Supported by SQLite and MySQL.
 func (u *UpdateBuilder) Limit(limit int) *UpdateBuilder {
-	if u.postgres() {
+	if u.Postgres() {
 		u.AddError(errors.New("LIMIT is not supported by PostgreSQL"))
 		return u
 	}
@@ -640,7 +640,7 @@ func (u *UpdateBuilder) Returning(columns ...string) *UpdateBuilder {
 
 // Query returns query representation of an `UPDATE` statement.
 func (u *UpdateBuilder) Query() (string, []any) {
-	b := u.Builder.clone()
+	b := u.Builder.Clone()
 	if len(u.prefix) > 0 {
 		b.join(u.prefix, " ")
 		b.Pad()
@@ -1567,7 +1567,7 @@ func (f *Func) String() string {
 // As suffixed the given column with an alias (`a` AS `b`).
 func As(ident string, as string) string {
 	b := &Builder{}
-	b.fromIdent(ident)
+	b.FromIdent(ident)
 	b.Ident(ident).Pad().WriteString("AS")
 	b.Pad().Ident(as)
 	return b.String()
@@ -1577,7 +1577,7 @@ func As(ident string, as string) string {
 func Distinct(idents ...string) string {
 	b := &Builder{}
 	if len(idents) > 0 {
-		b.fromIdent(idents[0])
+		b.FromIdent(idents[0])
 	}
 	b.WriteString("DISTINCT")
 	b.Pad().IdentComma(idents...)
@@ -1682,6 +1682,11 @@ func (s *SelectTable) ref() string {
 // Name returns the table name.
 func (s *SelectTable) Name() string {
 	return s.name
+}
+
+// Alias returns the table alias.
+func (s *SelectTable) Alias() string {
+	return s.as
 }
 
 // implement the table view.
@@ -1844,7 +1849,7 @@ func (s *Selector) AppendSelectExprAs(expr Querier, as string) *Selector {
 }
 
 func (s *Selector) AsStruct() *Selector {
-	if !s.spanner() {
+	if !s.Spanner() {
 		s.AddError(fmt.Errorf("AS STRUCT is only supported by GoogleSQL family dialects"))
 		return s
 	}
@@ -1853,7 +1858,7 @@ func (s *Selector) AsStruct() *Selector {
 }
 
 func (s *Selector) AsValue() *Selector {
-	if !s.spanner() {
+	if !s.Spanner() {
 		s.AddError(fmt.Errorf("AS VALUE is only supported by GoogleSQL family dialects"))
 		return s
 	}
@@ -1862,7 +1867,7 @@ func (s *Selector) AsValue() *Selector {
 }
 
 func (s *Selector) AsType(typ string) *Selector {
-	if !s.spanner() {
+	if !s.Spanner() {
 		s.AddError(fmt.Errorf("AS TYPE is only supported by GoogleSQL family dialects"))
 		return s
 	}
@@ -1874,18 +1879,18 @@ func (s *Selector) AsType(typ string) *Selector {
 // For example, for column "a" the following match: a, "a", "t"."a", "t"."b" AS "a".
 func (s *Selector) FindSelection(name string) (matches []string) {
 	matchC := func(qualified string) bool {
-		switch ident, pg := s.isIdent(qualified), s.postgres(); {
+		switch ident, pg := s.IsIdent(qualified), s.Postgres(); {
 		case !ident:
 			if i := strings.IndexRune(qualified, '.'); i > 0 {
 				return qualified[i+1:] == name
 			}
 		case ident && pg:
 			if i := strings.Index(qualified, `"."`); i > 0 {
-				return s.unquote(qualified[i+2:]) == name
+				return s.Unquote(qualified[i+2:]) == name
 			}
 		case ident:
 			if i := strings.Index(qualified, "`.`"); i > 0 {
-				return s.unquote(qualified[i+2:]) == name
+				return s.Unquote(qualified[i+2:]) == name
 			}
 		}
 		return false
@@ -1894,14 +1899,14 @@ func (s *Selector) FindSelection(name string) (matches []string) {
 		switch {
 		// Match aliases.
 		case c.as != "":
-			if ident := s.isIdent(c.as); !ident && c.as == name || ident && s.unquote(c.as) == name {
+			if ident := s.IsIdent(c.as); !ident && c.as == name || ident && s.Unquote(c.as) == name {
 				matches = append(matches, c.as)
 			}
 		// Match qualified columns.
-		case c.c != "" && s.isQualified(c.c) && matchC(c.c):
+		case c.c != "" && s.IsQualified(c.c) && matchC(c.c):
 			matches = append(matches, c.c)
 		// Match unqualified columns.
-		case c.c != "" && (c.c == name || s.isIdent(c.c) && s.unquote(c.c) == name):
+		case c.c != "" && (c.c == name || s.IsIdent(c.c) && s.Unquote(c.c) == name):
 			matches = append(matches, c.c)
 		}
 	}
@@ -1928,7 +1933,7 @@ func (s *Selector) UnqualifiedColumns() []string {
 		if c == "" {
 			continue
 		}
-		if s.isIdent(c) {
+		if s.IsIdent(c) {
 			parts := strings.FieldsFunc(c, func(r rune) bool {
 				return r == '`' || r == '"'
 			})
@@ -2248,7 +2253,7 @@ func (s *Selector) Except(t TableView) *Selector {
 
 // ExceptAll appends the EXCEPT ALL clause to the query.
 func (s *Selector) ExceptAll(t TableView) *Selector {
-	if s.sqlite() {
+	if s.Sqlite() {
 		s.AddError(errors.New("EXCEPT ALL is not supported by SQLite"))
 	} else {
 		s.setOps = append(s.setOps, setOp{
@@ -2271,7 +2276,7 @@ func (s *Selector) Intersect(t TableView) *Selector {
 
 // IntersectAll appends the INTERSECT ALL clause to the query.
 func (s *Selector) IntersectAll(t TableView) *Selector {
-	if s.sqlite() {
+	if s.Sqlite() {
 		s.AddError(errors.New("INTERSECT ALL is not supported by SQLite"))
 	} else {
 		s.setOps = append(s.setOps, setOp{
@@ -2292,7 +2297,7 @@ func (s *Selector) Prefix(queries ...Querier) *Selector {
 // C returns a formatted string for a selected column from this statement.
 func (s *Selector) C(column string) string {
 	// Skip formatting qualified columns.
-	if s.isQualified(column) {
+	if s.IsQualified(column) {
 		return column
 	}
 	if s.as != "" {
@@ -2457,7 +2462,7 @@ func (s *Selector) Clone() *Selector {
 		joins[i] = s.joins[i].clone()
 	}
 	return &Selector{
-		Builder:   s.Builder.clone(),
+		Builder:   s.Builder.Clone(),
 		ctx:       s.ctx,
 		as:        s.as,
 		or:        s.or,
@@ -2554,7 +2559,7 @@ func (s *Selector) Having(p *Predicate) *Selector {
 
 // Query returns query representation of a `SELECT` statement.
 func (s *Selector) Query() (string, []any) {
-	b := s.Builder.clone()
+	b := s.Builder.Clone()
 	s.joinPrefix(&b)
 	b.WriteString("SELECT ")
 	if s.distinct {
@@ -2722,7 +2727,7 @@ func joinOrder(order []any, b *Builder) {
 }
 
 func joinReturning(columns []string, b *Builder) {
-	if len(columns) == 0 || (!b.postgres() && !b.sqlite()) {
+	if len(columns) == 0 || (!b.Postgres() && !b.Sqlite()) {
 		return
 	}
 	b.WriteString(" RETURNING ")
@@ -3001,7 +3006,7 @@ type exprFunc struct {
 }
 
 func (e *exprFunc) Query() (string, []any) {
-	b := e.Builder.clone()
+	b := e.Builder.Clone()
 	e.fn(&b)
 	return b.Query()
 }
@@ -3038,7 +3043,7 @@ type Builder struct {
 func (b *Builder) Quote(ident string) string {
 	quote := "`"
 	switch {
-	case b.postgres():
+	case b.Postgres():
 		// If it was quoted with the wrong
 		// identifier character.
 		if strings.Contains(ident, "`") {
@@ -3056,12 +3061,12 @@ func (b *Builder) Quote(ident string) string {
 func (b *Builder) Ident(s string) *Builder {
 	switch {
 	case len(s) == 0:
-	case !strings.HasSuffix(s, "*") && !b.isIdent(s) && !isFunc(s) && !isModifier(s) && !isAlias(s):
+	case !strings.HasSuffix(s, "*") && !b.IsIdent(s) && !isFunc(s) && !isModifier(s) && !isAlias(s):
 		if b.qualifier != "" {
 			b.WriteString(b.Quote(b.qualifier)).WriteByte('.')
 		}
 		b.WriteString(b.Quote(s))
-	case (isFunc(s) || isModifier(s) || isAlias(s)) && b.postgres():
+	case (isFunc(s) || isModifier(s) || isAlias(s)) && b.Postgres():
 		// Modifiers and aggregation functions that
 		// were called without dialect information.
 		b.WriteString(strings.ReplaceAll(s, "`", `"`))
@@ -3079,6 +3084,20 @@ func (b *Builder) IdentComma(s ...string) *Builder {
 		}
 		b.Ident(s[i])
 	}
+	return b
+}
+
+// Indent adds indentation to the builder.
+func (b *Builder) Indent(depth int) *Builder {
+	for range depth {
+		b.WriteString("    ")
+	}
+	return b
+}
+
+// NewLine adds a new line to the builder.
+func (b *Builder) NewLine() *Builder {
+	b.WriteByte('\n')
 	return b
 }
 
@@ -3247,7 +3266,7 @@ func (b *Builder) Arg(a any) *Builder {
 	}
 	// Default placeholder param (MySQL and SQLite).
 	format := "?"
-	if b.postgres() {
+	if b.Postgres() {
 		// Postgres' arguments are referenced using the syntax $n.
 		// $1 refers to the 1st argument, $2 to the 2nd, and so on.
 		format = "$" + strconv.Itoa(b.total+1)
@@ -3291,6 +3310,18 @@ func (b *Builder) Argf(format string, a any) *Builder {
 	b.total++
 	b.args = append(b.args, a)
 	b.WriteString(format)
+	return b
+}
+
+// GetArgs returns the list of arguments added to the builder.
+func (b *Builder) GetArgs() []any {
+	return b.args
+}
+
+// ResetArgs resets the arguments list and the total count.
+func (b *Builder) ClearArgs() *Builder {
+	b.args = nil
+	b.total = 0
 	return b
 }
 
@@ -3350,6 +3381,18 @@ func (b *Builder) Wrap(f func(*Builder)) *Builder {
 	return b
 }
 
+// WrapBraces gets a callback, and wraps its result with braces.
+func (b *Builder) WrapBraces(f func(*Builder)) *Builder {
+	nb := &Builder{total: b.total, sb: &strings.Builder{}}
+	nb.WriteByte('{')
+	f(nb)
+	nb.WriteByte('}')
+	b.WriteString(nb.String())
+	b.args = append(b.args, nb.args...)
+	b.total = nb.total
+	return b
+}
+
 // Nested gets a callback, and wraps its result with parentheses.
 //
 // Deprecated: Use Builder.Wrap instead.
@@ -3383,8 +3426,8 @@ func (b Builder) Query() (string, []any) {
 	return b.String(), b.args
 }
 
-// clone returns a shallow clone of a builder.
-func (b Builder) clone() Builder {
+// Clone returns a shallow Clone of a builder.
+func (b Builder) Clone() Builder {
 	c := Builder{dialect: b.dialect, total: b.total, sb: &strings.Builder{}}
 	if len(b.args) > 0 {
 		c.args = append(c.args, b.args...)
@@ -3395,47 +3438,47 @@ func (b Builder) clone() Builder {
 	return c
 }
 
-// postgres reports if the builder dialect is PostgreSQL.
-func (b Builder) postgres() bool {
+// Postgres reports if the builder dialect is PostgreSQL.
+func (b Builder) Postgres() bool {
 	return b.Dialect() == dialect.Postgres
 }
 
-// sqlite reports if the builder dialect is SQLite.
-func (b Builder) sqlite() bool {
+// Sqlite reports if the builder dialect is SQLite.
+func (b Builder) Sqlite() bool {
 	return b.Dialect() == dialect.SQLite
 }
 
-// mysql reports if the builder dialect is MySQL.
-func (b Builder) mysql() bool {
+// Mysql reports if the builder dialect is MySQL.
+func (b Builder) Mysql() bool {
 	return b.Dialect() == dialect.MySQL
 }
 
-// spanner reports if the builder dialect is Spanner.
-func (b Builder) spanner() bool {
+// Spanner reports if the builder dialect is Spanner.
+func (b Builder) Spanner() bool {
 	return b.Dialect() == dialect.Spanner
 }
 
-// fromIdent sets the builder dialect from the identifier format.
-func (b *Builder) fromIdent(ident string) {
+// FromIdent sets the builder dialect from the identifier format.
+func (b *Builder) FromIdent(ident string) {
 	if strings.Contains(ident, `"`) {
 		b.SetDialect(dialect.Postgres)
 	}
 	// otherwise, use the default.
 }
 
-// isIdent reports if the given string is a dialect identifier.
-func (b *Builder) isIdent(s string) bool {
+// IsIdent reports if the given string is a dialect identifier.
+func (b *Builder) IsIdent(s string) bool {
 	switch {
-	case b.postgres():
+	case b.Postgres():
 		return strings.Contains(s, `"`)
 	default:
 		return strings.Contains(s, "`")
 	}
 }
 
-// unquote database identifiers.
-func (b *Builder) unquote(s string) string {
-	switch pg := b.postgres(); {
+// Unquote database identifiers.
+func (b *Builder) Unquote(s string) string {
+	switch pg := b.Postgres(); {
 	case len(s) < 2:
 	case !pg && s[0] == '`' && s[len(s)-1] == '`', pg && s[0] == '"' && s[len(s)-1] == '"':
 		if u, err := strconv.Unquote(s); err == nil {
@@ -3445,9 +3488,9 @@ func (b *Builder) unquote(s string) string {
 	return s
 }
 
-// isQualified reports if the given string is a qualified identifier.
-func (b *Builder) isQualified(s string) bool {
-	ident, pg := b.isIdent(s), b.postgres()
+// IsQualified reports if the given string is a qualified identifier.
+func (b *Builder) IsQualified(s string) bool {
+	ident, pg := b.IsIdent(s), b.Postgres()
 	return !ident && len(s) > 2 && strings.ContainsRune(s[1:len(s)-1], '.') || // <qualifier>.<column>
 		ident && pg && strings.Contains(s, `"."`) || // "qualifier"."column"
 		ident && !pg && strings.Contains(s, "`.`") // `qualifier`.`column`

@@ -396,6 +396,9 @@ func (t Type) Table() string {
 	if t.schema != nil && t.schema.Config.Table != "" {
 		return t.schema.Config.Table
 	}
+	if ant := t.EntSQL(); ant != nil && ant.PascalCase {
+		return pascal(rules.Pluralize(t.Name))
+	}
 	return snake(rules.Pluralize(t.Name))
 }
 
@@ -1151,6 +1154,11 @@ func (t Type) UnexportedForeignKeys() []*ForeignKey {
 		}
 	}
 	return fks
+}
+
+// NodeTableName returns the node table name for property graph.
+func (t Type) NodeTableName() string {
+	return t.Table()
 }
 
 // aliases adds package aliases (local names) for all type-packages that
@@ -2255,10 +2263,18 @@ func (e Edge) Index() (int, error) {
 	return 0, fmt.Errorf("edge %q was not found in its owner schema %q", e.Name, e.Owner.Name)
 }
 
-// PropertyGraphAlias returns the alias for this edge when used in property graphs.
-// TODO: Implement edge aliasing for Spanner property graphs.
-func (e Edge) PropertyGraphAlias() string {
-	return e.Name // Default to edge name
+// EdgeTableName returns the edge table name for property graph.
+func (e Edge) EdgeTableName() string {
+	if e.IsInverse() {
+		if ant := e.Type.EntSQL(); ant != nil && ant.PascalCase {
+			return e.Ref.Type.Table() + pascal(e.Name)
+		}
+		return e.Ref.Type.Table() + "_" + snake(e.Name)
+	}
+	if ant := e.Type.EntSQL(); ant != nil && ant.PascalCase {
+		return e.Owner.Table() + pascal(e.Name)
+	}
+	return e.Owner.Table() + "_" + snake(e.Name)
 }
 
 // PropertyGraphLabels returns multiple labels that can be applied to this edge.

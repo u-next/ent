@@ -20,7 +20,6 @@ import (
 	"strings"
 	"text/template/parse"
 
-	gqlschema "entgo.io/ent/dialect/gql/schema"
 	"entgo.io/ent/dialect/sql/schema"
 	"entgo.io/ent/entc/load"
 	"entgo.io/ent/schema/field"
@@ -878,7 +877,7 @@ func (g *Graph) Views() (views []*schema.Table, err error) {
 }
 
 // PropertyGraphs returns the schema definition of a property graph for the graph.
-func (g *Graph) PropertyGraphs() (pgs []*gqlschema.PropertyGraph, err error) {
+func (g *Graph) PropertyGraphs() (pgs []*schema.PropertyGraph, err error) {
 	// Create a property graph for the entire schema if there are nodes
 	if len(g.Nodes) == 0 {
 		return nil, nil
@@ -886,7 +885,7 @@ func (g *Graph) PropertyGraphs() (pgs []*gqlschema.PropertyGraph, err error) {
 
 	// Create a property graph with a default name
 	graphName := "DefaultGraph"
-	pg := gqlschema.NewPropertyGraph(graphName)
+	pg := schema.NewPropertyGraph(graphName)
 
 	// Add node tables for all mutable nodes (exclude views and edge schemas)
 	for _, n := range g.Nodes {
@@ -921,17 +920,17 @@ func (g *Graph) PropertyGraphs() (pgs []*gqlschema.PropertyGraph, err error) {
 		}
 	}
 
-	return []*gqlschema.PropertyGraph{pg}, nil
+	return []*schema.PropertyGraph{pg}, nil
 }
 
 // addPGNodeElement adds a node representation to the property graph.
-func addPGNodeElement(pg *gqlschema.PropertyGraph, n *Type) error {
+func addPGNodeElement(pg *schema.PropertyGraph, n *Type) error {
 	if n.Table() == "" {
 		return fmt.Errorf("node %s has empty table name", n.Name)
 	}
 
 	// Use table name for property graph DDL
-	nodeTable := gqlschema.NewNodeTable(n.Table())
+	nodeTable := schema.NewNodeTable(n.NodeTableName())
 
 	// Set element key based on the node's ID configuration
 	if err := setNodeKeys(nodeTable, n); err != nil {
@@ -940,7 +939,7 @@ func addPGNodeElement(pg *gqlschema.PropertyGraph, n *Type) error {
 
 	// Add a default label with all properties
 	// TODO: Customize properties based on requirements
-	label := gqlschema.NewDefaultLabel().SetProperties(gqlschema.NewAllProperties())
+	label := schema.NewDefaultLabel().SetProperties(schema.NewAllProperties())
 	nodeTable.AddLabel(label)
 
 	pg.AddNodeTable(nodeTable)
@@ -948,7 +947,7 @@ func addPGNodeElement(pg *gqlschema.PropertyGraph, n *Type) error {
 }
 
 // addPGEdgeElement adds appropriate edge representation to the property graph.
-func addPGEdgeElement(pg *gqlschema.PropertyGraph, n *Type, e *Edge) error {
+func addPGEdgeElement(pg *schema.PropertyGraph, n *Type, e *Edge) error {
 	// Polymorphic edges are handled differently, because they create multiple edge tables.
 	if e.Rel.Type == Polymorphic {
 		// For each target type, create a separate edge table.
@@ -959,17 +958,17 @@ func addPGEdgeElement(pg *gqlschema.PropertyGraph, n *Type, e *Edge) error {
 			// Create unique edge table name for this type combination.
 			edgeTableName := fmt.Sprintf("%s_%s_%s", n.Table(), e.Name, targetType.Table())
 			// Create edge table.
-			edgeTable := gqlschema.NewEdgeTable(edgeTableName)
+			edgeTable := schema.NewEdgeTable(edgeTableName)
 			if len(e.Rel.Columns) == 0 {
 				return fmt.Errorf("polymorphic edge %s.%s has no columns", n.Name, e.Name)
 			}
-			edgeTable.SetKey(gqlschema.NewElementKey(e.Rel.Columns[0]))
-			edgeTable.SetSourceKey(gqlschema.NewReferenceKey(
+			edgeTable.SetKey(schema.NewElementKey(e.Rel.Columns[0]))
+			edgeTable.SetSourceKey(schema.NewReferenceKey(
 				[]string{n.ID.Column().Name},
 				n.Table(),
 				[]string{n.ID.Column().Name},
 			))
-			edgeTable.SetDestinationKey(gqlschema.NewReferenceKey(
+			edgeTable.SetDestinationKey(schema.NewReferenceKey(
 				[]string{e.Rel.Columns[0]}, // The polymorphic foreign key field.
 				targetType.Table(),
 				[]string{targetType.ID.Column().Name},
@@ -980,9 +979,9 @@ func addPGEdgeElement(pg *gqlschema.PropertyGraph, n *Type, e *Edge) error {
 	}
 
 	// Regular edges (non-polymorphic, non-edge-schema)
-	edgeTable := gqlschema.NewEdgeTable(e.Rel.Table).SetAlias(e.Label())
+	edgeTable := schema.NewEdgeTable(e.EdgeTableName())
 	// TODO: Customize labels based on requirements
-	edgeTable.AddLabel(gqlschema.NewDefaultLabel().SetProperties(gqlschema.NewAllProperties()))
+	edgeTable.AddLabel(schema.NewDefaultLabel().SetProperties(schema.NewAllProperties()))
 
 	// Set source and destination keys based on the edge relationship
 	if err := setEdgeKeys(edgeTable, n, e); err != nil {
@@ -993,13 +992,13 @@ func addPGEdgeElement(pg *gqlschema.PropertyGraph, n *Type, e *Edge) error {
 }
 
 // setNodeKeys sets the primary key for a node based on its ID configuration.
-func setNodeKeys(nodeTable *gqlschema.NodeTable, n *Type) error {
+func setNodeKeys(nodeTable *schema.NodeTable, n *Type) error {
 	if n.HasOneFieldID() {
 		// Single field ID
 		if n.ID.Column() == nil {
 			return fmt.Errorf("node %s ID field has no column", n.Name)
 		}
-		nodeTable.SetKey(gqlschema.NewElementKey(n.ID.Column().Name))
+		nodeTable.SetKey(schema.NewElementKey(n.ID.Column().Name))
 	} else if n.HasCompositeID() {
 		// Composite ID from edge schema
 		var keyColumns []string
@@ -1010,7 +1009,7 @@ func setNodeKeys(nodeTable *gqlschema.NodeTable, n *Type) error {
 			keyColumns = append(keyColumns, idField.Column().Name)
 		}
 		if len(keyColumns) > 0 {
-			nodeTable.SetKey(gqlschema.NewElementKey(keyColumns...))
+			nodeTable.SetKey(schema.NewElementKey(keyColumns...))
 		}
 	} else {
 		// No identifiable primary key
@@ -1021,7 +1020,7 @@ func setNodeKeys(nodeTable *gqlschema.NodeTable, n *Type) error {
 			}
 		}
 		if len(idFields) > 0 {
-			nodeTable.SetKey(gqlschema.NewElementKey(idFields...))
+			nodeTable.SetKey(schema.NewElementKey(idFields...))
 		} else {
 			// No primary key found
 			return fmt.Errorf("node %s has no identifiable primary key", n.Name)
@@ -1031,7 +1030,7 @@ func setNodeKeys(nodeTable *gqlschema.NodeTable, n *Type) error {
 }
 
 // setEdgeKeys sets the source and destination keys for an edge based on its relationship type.
-func setEdgeKeys(edgeTable *gqlschema.EdgeTable, n *Type, e *Edge) error {
+func setEdgeKeys(edgeTable *schema.EdgeTable, n *Type, e *Edge) error {
 	var srcRefCols []string
 	if n.HasCompositeID() {
 		for _, idf := range n.EdgeSchema.ID {
@@ -1054,31 +1053,31 @@ func setEdgeKeys(edgeTable *gqlschema.EdgeTable, n *Type, e *Edge) error {
 		return fmt.Errorf("destination type %s for edge %s.%s has no identifiable primary key", e.Type.Name, n.Name, e.Name)
 	}
 
-	var src, dst *gqlschema.ReferenceKey
+	var src, dst *schema.ReferenceKey
 	switch e.Rel.Type {
 	case O2O, O2M, M2O:
 		if len(e.Rel.Columns) != 1 {
 			return fmt.Errorf("%s edge %s.%s must have exactly one column, got %d", e.Rel.Type, n.Name, e.Name, len(e.Rel.Columns))
 		}
-		edgeTable.SetKey(gqlschema.NewElementKey(e.Rel.Columns[0]))
+		edgeTable.SetKey(schema.NewElementKey(e.Rel.Columns[0]))
 		if e.Rel.Type == M2O {
-			src = gqlschema.NewReferenceKey(
+			src = schema.NewReferenceKey(
 				srcRefCols,
 				n.Table(),
 				srcRefCols,
 			)
-			dst = gqlschema.NewReferenceKey(
+			dst = schema.NewReferenceKey(
 				[]string{e.Rel.Columns[0]},
 				e.Type.Table(),
 				dstRefCols,
 			)
 		} else { // O2O, O2M
-			src = gqlschema.NewReferenceKey(
+			src = schema.NewReferenceKey(
 				[]string{e.Rel.Columns[0]},
 				n.Table(),
 				srcRefCols,
 			)
-			dst = gqlschema.NewReferenceKey(
+			dst = schema.NewReferenceKey(
 				srcRefCols,
 				e.Type.Table(),
 				dstRefCols,
@@ -1088,15 +1087,15 @@ func setEdgeKeys(edgeTable *gqlschema.EdgeTable, n *Type, e *Edge) error {
 		if len(e.Rel.Columns) < 2 {
 			return fmt.Errorf("insufficient columns for M2M relationship")
 		}
-		edgeTable.SetKey(gqlschema.NewElementKey(e.Rel.Columns...))
+		edgeTable.SetKey(schema.NewElementKey(e.Rel.Columns...))
 		sourceColumns := []string{e.Rel.Columns[0]}
-		src = gqlschema.NewReferenceKey(
+		src = schema.NewReferenceKey(
 			sourceColumns,
 			n.Table(),
 			srcRefCols,
 		)
 		destColumns := []string{e.Rel.Columns[1]}
-		dst = gqlschema.NewReferenceKey(
+		dst = schema.NewReferenceKey(
 			destColumns,
 			e.Type.Table(),
 			dstRefCols,

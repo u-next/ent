@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"entgo.io/ent/schema"
+	"google.golang.org/protobuf/proto"
 )
 
 // String returns a new Field with type string.
@@ -155,6 +156,39 @@ func UUID(name string, typ driver.Valuer) *uuidBuilder {
 		Name: name,
 		Info: &TypeInfo{
 			Type:    TypeUUID,
+			Ident:   rt.String(),
+			PkgPath: indirect(rt).PkgPath(),
+		},
+	}}
+	b.desc.goType(typ)
+	return b
+}
+
+// TODO: add support for protobuf types
+// Proto returns a new Field with type protobuf message. An example for defining protobuf field is as follows:
+//
+// field.Proto("order", &orderv1.Order{})
+func Proto(name string, typ proto.Message) *protoBuilder {
+	rt := reflect.TypeOf(typ)
+	b := &protoBuilder{&Descriptor{
+		Name: name,
+		Info: &TypeInfo{
+			Type:    TypeProto,
+			Ident:   string(typ.ProtoReflect().Descriptor().FullName()),
+			PkgPath: indirect(rt).PkgPath(),
+		},
+	}}
+	b.desc.goType(typ)
+	return b
+}
+
+// TODO: add support for array types
+func Array(name string, typ any) *arrayBuilder {
+	rt := reflect.TypeOf(typ)
+	b := &arrayBuilder{&Descriptor{
+		Name: name,
+		Info: &TypeInfo{
+			Type:    TypeArray,
 			Ident:   rt.String(),
 			PkgPath: indirect(rt).PkgPath(),
 		},
@@ -1281,6 +1315,16 @@ func (b *uuidBuilder) Deprecated(reason ...string) *uuidBuilder {
 func (b *uuidBuilder) Descriptor() *Descriptor {
 	b.desc.checkGoType(valueScannerType)
 	return b.desc
+}
+
+// protoBuilder is the builder for protobuf fields.
+type protoBuilder struct {
+	desc *Descriptor
+}
+
+// arrayBuilder is the builder for array fields.
+type arrayBuilder struct {
+	desc *Descriptor
 }
 
 // otherBuilder is the builder for other fields.

@@ -193,6 +193,13 @@ type Annotation struct {
 	//	}
 	ViewFor map[string]string `json:"view_for,omitempty"`
 
+	// PascalCase sets the naming convention to PascalCase for the annotated table.
+	//
+	//	entsql.Annotation{
+	//		PascalCase: true,
+	//	}
+	PascalCase bool `json:"pascal_case,omitempty"`
+
 	// error occurs during annotation build. This field is not
 	// serialized to JSON and used only by the codegen loader.
 	err error
@@ -296,6 +303,13 @@ func ViewFor(dialect string, as func(*sql.Selector)) *Annotation {
 		return &Annotation{
 			ViewFor: map[string]string{dialect: q},
 		}
+	}
+}
+
+// PascalCase sets the naming convention to PascalCase for the annotated table.
+func PascalCase() *Annotation {
+	return &Annotation{
+		PascalCase: true,
 	}
 }
 

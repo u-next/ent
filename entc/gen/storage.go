@@ -11,9 +11,9 @@ import (
 	"slices"
 	"strings"
 
-	"entgo.io/ent/dialect/gql"
 	"entgo.io/ent/dialect/gremlin/graph/dsl"
 	"entgo.io/ent/dialect/sql"
+	"entgo.io/ent/dialect/sql/sqlpgq"
 )
 
 // A SchemaMode defines what type of schema feature a storage driver support.
@@ -55,7 +55,7 @@ var drivers = []*Storage{
 		Name:      "sql",
 		IdentName: "SQL",
 		Builder:   reflect.TypeOf(&sql.Selector{}),
-		Dialects:  []string{"dialect.SQLite", "dialect.MySQL", "dialect.Postgres"},
+		Dialects:  []string{"dialect.SQLite", "dialect.MySQL", "dialect.Postgres", "dialect.Spanner"},
 		Imports: []string{
 			"database/sql/driver",
 			"entgo.io/ent/dialect/sql",
@@ -114,14 +114,14 @@ var drivers = []*Storage{
 		Init:       func(*Graph) error { return nil }, // Noop.
 	},
 	{
-		Name:      "gql",
-		IdentName: "GQL",
-		Builder:   reflect.TypeOf(&gql.GraphQuery{}),
+		Name:      "sqlpgq",
+		IdentName: "SQL/PGQ",
+		Builder:   reflect.TypeOf(&sqlpgq.GraphQuery{}),
 		Dialects:  []string{"dialect.Spanner"},
-		// TODO: add imports for gql codegen.
+		// TODO: add imports for sqlpgq codegen.
 		Imports: []string{
-			"entgo.io/ent/dialect/gql",
-			"entgo.io/ent/dialect/gql/schema",
+			"entgo.io/ent/dialect/sqlpgq",
+			"entgo.io/ent/dialect/sqlpgq/schema",
 		},
 		SchemaMode: Unique | Migrate,
 		OpCode:     opCodes(gqlCode[:]),
@@ -161,7 +161,7 @@ var (
 		HasSuffix: "EndingWith",
 	}
 	// TODO: implement GQL operation codes
-	// exceptional operation names in gql.
+	// exceptional operation names in sqlpgq.
 	gqlCode = [...]string{}
 )
 

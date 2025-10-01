@@ -17,7 +17,6 @@ import (
 	"unicode"
 
 	"entgo.io/ent/cmd/internal/printer"
-	gqlschema "entgo.io/ent/dialect/gql/schema"
 	"entgo.io/ent/dialect/sql/schema"
 	"entgo.io/ent/entc"
 	"entgo.io/ent/entc/gen"
@@ -271,34 +270,24 @@ func SchemaCmd() *cobra.Command {
 				if err != nil {
 					log.Fatalln(err)
 				}
+				var propertyGraphs []*schema.PropertyGraph
+				if graph {
+					propertyGraphs, err = g.PropertyGraphs()
+					if err != nil {
+						log.Fatalln(err)
+					}
+				}
 				ddl, err := schema.DDL(cmd.Context(), schema.DDLArgs{
-					Dialect:     dlct,
-					Version:     version,
-					HashSymbols: hashSymbols,
-					Tables:      append(t, v...),
+					Dialect:        dlct,
+					Version:        version,
+					HashSymbols:    hashSymbols,
+					Tables:         append(t, v...),
+					PropertyGraphs: propertyGraphs,
 				})
 				if err != nil {
 					log.Fatalln(err)
 				}
 				fmt.Println(ddl)
-				// Output the property graph DDL if requested.
-				if graph {
-					fmt.Println("-- Property Graph DDL")
-					pgs, err := g.PropertyGraphs()
-					if err != nil {
-						log.Fatalln(err)
-					}
-					ddl, err := gqlschema.PropertyGraphDDL(cmd.Context(), gqlschema.DDLArgs{
-						Dialect:        dlct,
-						Version:        version,
-						HashSymbols:    hashSymbols,
-						PropertyGraphs: pgs,
-					})
-					if err != nil {
-						log.Fatalln(err)
-					}
-					fmt.Println(ddl)
-				}
 			},
 		}
 	)
