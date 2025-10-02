@@ -72,27 +72,27 @@ func (g *GraphQuery) Let(as ...*assignment) *GraphQuery {
 }
 
 // Return adds a RETURN statement to the linear query.
-func (g *GraphQuery) Return(items ...*columnExpr) *GraphQuery {
+func (g *GraphQuery) Return(items ...*Expression) *GraphQuery {
 	return g.Append(Return(items...))
 }
 
 // ReturnAll adds a RETURN ALL statement to the linear query.
-func (g *GraphQuery) ReturnAll(items ...*columnExpr) *GraphQuery {
+func (g *GraphQuery) ReturnAll(items ...*Expression) *GraphQuery {
 	return g.Append(ReturnAll(items...))
 }
 
 // ReturnDistinct adds a RETURN DISTINCT statement to the linear query.
-func (g *GraphQuery) ReturnDistinct(items ...*columnExpr) *GraphQuery {
+func (g *GraphQuery) ReturnDistinct(items ...*Expression) *GraphQuery {
 	return g.Append(ReturnDistinct(items...))
 }
 
 // GroupBy adds a GROUP BY clause to the last RETURN or WITH statement.
-func (g *GraphQuery) GroupBy(items ...*columnExpr) *GraphQuery {
+func (g *GraphQuery) GroupBy(items ...*Expression) *GraphQuery {
 	return g.Append(GroupBy(items...))
 }
 
 // OrderBy adds an ORDER BY statement to the linear query.
-func (g *GraphQuery) OrderBy(obs ...*columnExpr) *GraphQuery {
+func (g *GraphQuery) OrderBy(obs ...orderExpr) *GraphQuery {
 	return g.Append(OrderBy(obs...))
 }
 
@@ -112,17 +112,17 @@ func (g *GraphQuery) Skip(count int64) *GraphQuery {
 }
 
 // With adds a WITH statement to the linear query.
-func (g *GraphQuery) With(items ...*columnExpr) *GraphQuery {
+func (g *GraphQuery) With(items ...*Expression) *GraphQuery {
 	return g.Append(With(items...))
 }
 
 // WithAll adds a WITH ALL statement to the linear query.
-func (g *GraphQuery) WithAll(items ...*columnExpr) *GraphQuery {
+func (g *GraphQuery) WithAll(items ...*Expression) *GraphQuery {
 	return g.Append(WithAll(items...))
 }
 
 // WithDistinct adds a WITH DISTINCT statement to the linear query.
-func (g *GraphQuery) WithDistinct(items ...*columnExpr) *GraphQuery {
+func (g *GraphQuery) WithDistinct(items ...*Expression) *GraphQuery {
 	return g.Append(WithDistinct(items...))
 }
 
@@ -269,84 +269,43 @@ func (f *FilterBuilder) Query() (string, []any) {
 
 func (f *FilterBuilder) stmt() {}
 
-// FIXME: refactor order by clauses
-// columnExpr represents a single column expression.
-type columnExpr struct {
-	sql.Builder
-	expr    sql.Querier
-	alias   string
-	star    bool
-	collate string
-	asc     bool
-	desc    bool
-}
+type orderExpr func(*sql.Builder)
 
-// AllColumns creates a new column expression representing all columns (*).
-func AllColumns() *columnExpr {
-	return &columnExpr{star: true}
-}
-
-// FIXME: Const creates a new constant column expression.
-func Const(v any) *columnExpr {
-	return &columnExpr{expr: sql.Expr("?", v)}
-}
-
-// Column creates a new column expression.
-func Column(expr string, args ...any) *columnExpr {
-	return &columnExpr{expr: sql.Expr(expr, args...)}
-}
-
-// ColumnExpr creates a new column expression from a sql.Querier.
-func ColumnExpr(expr sql.Querier) *columnExpr {
-	return &columnExpr{expr: expr}
-}
-
-// As sets the alias for the column expression.
-func (r *columnExpr) As(alias string) *columnExpr {
-	r.alias = alias
-	return r
+func OrderByExpr(expr *Expression) orderExpr {
+	return func(b *sql.Builder) {
+		b.Join(expr)
+	}
 }
 
 // Collate adds a COLLATE specification to the column expression.
-func (r *columnExpr) Collate(collate string) *columnExpr {
-	r.collate = collate
-	return r
+func (o orderExpr) Collate(collate string) orderExpr {
+	return func(b *sql.Builder) {
+		o(b)
+		b.WriteString(" COLLATE ")
+		b.WriteString(collate)
+	}
 }
 
 // Asc sets the order to ascending (default).
-func (r *columnExpr) Asc() *columnExpr {
-	r.asc = true
-	r.desc = false
-	return r
+func (c orderExpr) Asc() orderExpr {
+	return func(b *sql.Builder) {
+		c(b)
+		b.WriteString(" ASC")
+	}
 }
 
 // Desc sets the order to descending.
-func (r *columnExpr) Desc() *columnExpr {
-	r.desc = true
-	r.asc = false
-	return r
+func (c orderExpr) Desc() orderExpr {
+	return func(b *sql.Builder) {
+		c(b)
+		b.WriteString(" DESC")
+	}
 }
 
-func (r *columnExpr) Query() (string, []any) {
-	if r.star {
-		r.WriteByte('*')
-	} else if r.expr != nil {
-		r.Join(r.expr)
-		if r.alias != "" {
-			r.WriteString(" AS ")
-			r.Ident(r.alias)
-		}
-		if r.collate != "" {
-			r.WriteString(" COLLATE ")
-			r.WriteString(r.collate)
-		}
-		if r.desc {
-			r.WriteString(" DESC")
-		} else if r.asc {
-			r.WriteString(" ASC")
-		}
-	}
-	return r.String(), r.GetArgs()
+func (o orderExpr) Query() (string, []any) {
+	var b sql.Builder
+	o(&b)
+	return b.String(), b.GetArgs()
 }
 
 // ReturnBuilder is a builder for RETURN statements.
@@ -362,22 +321,22 @@ type ReturnBuilder struct {
 }
 
 // Return creates a new RETURN statement builder.
-func Return(items ...*columnExpr) *ReturnBuilder {
+func Return(items ...*Expression) *ReturnBuilder {
 	return (&ReturnBuilder{}).Append(items...)
 }
 
 // ReturnAll creates a new RETURN ALL statement builder.
-func ReturnAll(items ...*columnExpr) *ReturnBuilder {
+func ReturnAll(items ...*Expression) *ReturnBuilder {
 	return (&ReturnBuilder{all: true, distinct: false}).Append(items...)
 }
 
 // ReturnDistinct creates a new RETURN DISTINCT statement builder.
-func ReturnDistinct(items ...*columnExpr) *ReturnBuilder {
+func ReturnDistinct(items ...*Expression) *ReturnBuilder {
 	return (&ReturnBuilder{all: false, distinct: true}).Append(items...)
 }
 
 // Append adds more return items to the RETURN statement.
-func (r *ReturnBuilder) Append(items ...*columnExpr) *ReturnBuilder {
+func (r *ReturnBuilder) Append(items ...*Expression) *ReturnBuilder {
 	for _, column := range items {
 		r.items = append(r.items, column)
 	}
@@ -449,11 +408,11 @@ func (r *ReturnBuilder) stmt() {}
 type assignment struct {
 	sql.Builder
 	variable string
-	value    sql.Querier
+	value    *Expression
 }
 
 // Assign creates a new assignment expression.
-func Assign(name string, value sql.Querier) *assignment {
+func Assign(name string, value *Expression) *assignment {
 	return &assignment{
 		variable: name,
 		value:    value,
@@ -467,20 +426,20 @@ func (a *assignment) Var(name string) *assignment {
 }
 
 // Value sets the expression to assign.
-func (a *assignment) Value(value sql.Querier) *assignment {
+func (a *assignment) Value(value *Expression) *assignment {
 	a.value = value
 	return a
 }
 
-// F returns the field name of the variable.
-func (a *assignment) F(fields ...string) string {
+// F returns the field access expression for the assigned variable.
+func (a *assignment) F(fields ...string) *Expression {
 	var b sql.Builder
 	b.Ident(a.variable)
 	for _, f := range fields {
 		b.WriteByte('.')
 		b.Ident(f)
 	}
-	return b.String()
+	return Expr(b.String())
 }
 
 func (a *assignment) Query() (string, []any) {
@@ -499,6 +458,12 @@ type LetBuilder struct {
 // Let creates a new LET statement builder.
 func Let() *LetBuilder {
 	return &LetBuilder{}
+}
+
+// Assign adds a new assignment to the LET statement.
+func (let *LetBuilder) Assign(name string, value *Expression) *LetBuilder {
+	let.assignments = append(let.assignments, Assign(name, value))
+	return let
 }
 
 // Append adds more assignments to the LET statement.
@@ -528,12 +493,12 @@ type GroupByBuilder struct {
 }
 
 // GroupBy creates a new GROUP BY statement builder.
-func GroupBy(items ...*columnExpr) *GroupByBuilder {
+func GroupBy(items ...*Expression) *GroupByBuilder {
 	return (&GroupByBuilder{}).Append(items...)
 }
 
 // Append adds more expressions to the GROUP BY statement.
-func (g *GroupByBuilder) Append(items ...*columnExpr) *GroupByBuilder {
+func (g *GroupByBuilder) Append(items ...*Expression) *GroupByBuilder {
 	for _, item := range items {
 		g.exprs = append(g.exprs, item)
 	}
@@ -559,12 +524,12 @@ type OrderByBuilder struct {
 }
 
 // OrderBy creates a new ORDER BY statement builder.
-func OrderBy(items ...*columnExpr) *OrderByBuilder {
+func OrderBy(items ...orderExpr) *OrderByBuilder {
 	return (&OrderByBuilder{}).Append(items...)
 }
 
 // Asc adds an ascending order expression.
-func (o *OrderByBuilder) Append(orders ...*columnExpr) *OrderByBuilder {
+func (o *OrderByBuilder) Append(orders ...orderExpr) *OrderByBuilder {
 	for _, order := range orders {
 		o.orders = append(o.orders, order)
 	}
@@ -653,8 +618,8 @@ type ForBuilder struct {
 	offset  string
 }
 
-// For creates a new FOR statement builder with the given element name.
-func For(name string) *ForBuilder {
+// Element creates a new FOR statement builder with the given element name.
+func Element(name string) *ForBuilder {
 	return &ForBuilder{element: name}
 }
 
@@ -705,16 +670,16 @@ func (f *ForBuilder) Query() (string, []any) {
 }
 
 // Elem returns the element variable name.
-func (f *ForBuilder) Elem() string {
-	return fmt.Sprintf("`%s`", f.element)
+func (f *ForBuilder) Elem() *Expression {
+	return Expr(fmt.Sprintf("`%s`", f.element))
 }
 
 // Offset returns the offset variable name.
-func (f *ForBuilder) Offset() string {
+func (f *ForBuilder) Offset() *Expression {
 	if f.offset == "" {
 		f.offset = "offset"
 	}
-	return fmt.Sprintf("`%s`", f.offset)
+	return Expr(fmt.Sprintf("`%s`", f.offset))
 }
 
 func (f *ForBuilder) stmt() {}
@@ -749,22 +714,22 @@ type WithBuilder struct {
 }
 
 // With creates a new WITH statement builder.
-func With(items ...*columnExpr) *WithBuilder {
+func With(items ...*Expression) *WithBuilder {
 	return (&WithBuilder{}).Append(items...)
 }
 
 // WithAll creates a new WITH ALL statement builder.
-func WithAll(items ...*columnExpr) *WithBuilder {
+func WithAll(items ...*Expression) *WithBuilder {
 	return (&WithBuilder{all: true, distinct: false}).Append(items...)
 }
 
 // WithDistinct creates a new WITH DISTINCT statement builder.
-func WithDistinct(items ...*columnExpr) *WithBuilder {
+func WithDistinct(items ...*Expression) *WithBuilder {
 	return (&WithBuilder{all: false, distinct: true}).Append(items...)
 }
 
 // Append adds more return items to the WITH statement.
-func (w *WithBuilder) Append(items ...*columnExpr) *WithBuilder {
+func (w *WithBuilder) Append(items ...*Expression) *WithBuilder {
 	for _, item := range items {
 		w.items = append(w.items, item)
 	}
@@ -1019,24 +984,24 @@ func isAlias(s string) bool {
 }
 
 // Concat concatenates two path patterns with the || operator.
-func Concat(p, q *PathPattern) sql.Querier {
-	return sql.ExprFunc(func(b *sql.Builder) {
-		if p.variable != "" {
-			b.Ident(p.variable)
-		} else {
-			b.Wrap(func(b *sql.Builder) {
-				b.Join(p)
-			})
-		}
-		b.WriteString(" || ")
-		if q.variable != "" {
-			b.Ident(q.variable)
-		} else {
-			b.Wrap(func(b *sql.Builder) {
-				b.Join(q)
-			})
-		}
-	})
+func Concat(p, q *PathPattern) *Expression {
+	var b sql.Builder
+	if p.variable != "" {
+		b.Ident(p.variable)
+	} else {
+		b.Wrap(func(b *sql.Builder) {
+			b.Join(p)
+		})
+	}
+	b.WriteString(" || ")
+	if q.variable != "" {
+		b.Ident(q.variable)
+	} else {
+		b.Wrap(func(b *sql.Builder) {
+			b.Join(q)
+		})
+	}
+	return Expr(b.String(), b.GetArgs()...)
 }
 
 type GraphPatternBuilder struct {
@@ -1252,7 +1217,7 @@ type NodePattern struct {
 // N creates a new node pattern builder.
 func N() *NodePattern {
 	return &NodePattern{
-		filler: &patternFiller{properties: make(map[string]sql.Querier)},
+		filler: &patternFiller{properties: make(map[string]*Expression)},
 	}
 }
 
@@ -1264,7 +1229,7 @@ func (n *NodePattern) Named(name string) *NodePattern {
 
 // Labels sets the node labels using simple OR logic.
 func (n *NodePattern) Labels(labels ...string) *NodePattern {
-	ls := make([]*LabelExpr, len(labels))
+	ls := make([]*labelExpr, len(labels))
 	for i, l := range labels {
 		ls[i] = L(l)
 	}
@@ -1273,19 +1238,19 @@ func (n *NodePattern) Labels(labels ...string) *NodePattern {
 }
 
 // LabelExpression sets a complex label expression.
-func (n *NodePattern) LabelExpr(expr *LabelExpr) *NodePattern {
+func (n *NodePattern) LabelExpr(expr *labelExpr) *NodePattern {
 	n.filler.labelExpr = expr
 	return n
 }
 
 // Property adds a property filter.
-func (n *NodePattern) Property(key string, expr sql.Querier) *NodePattern {
+func (n *NodePattern) Property(key string, expr *Expression) *NodePattern {
 	n.filler.properties[key] = expr
 	return n
 }
 
 // Properties adds multiple property filters.
-func (n *NodePattern) Properties(props map[string]sql.Querier) *NodePattern {
+func (n *NodePattern) Properties(props map[string]*Expression) *NodePattern {
 	maps.Copy(n.filler.properties, props)
 	return n
 }
@@ -1296,8 +1261,8 @@ func (n *NodePattern) Where(condition *sql.Predicate) *NodePattern {
 	return n
 }
 
-// F returns a formatted string for the field of the node variable.
-func (n *NodePattern) F(fields ...string) string {
+// F returns the field access expression for the node variable.
+func (n *NodePattern) F(fields ...string) *Expression {
 	var b sql.Builder
 	if n.filler.variable != "" {
 		b.Ident(n.filler.variable)
@@ -1305,11 +1270,11 @@ func (n *NodePattern) F(fields ...string) string {
 	for _, field := range fields {
 		b.WriteByte('.').Ident(field)
 	}
-	return b.String()
+	return Expr(b.String())
 }
 
 // L returns a label expression for the node pattern.
-func (n *NodePattern) L() *LabelExpr {
+func (n *NodePattern) L() *labelExpr {
 	return n.filler.labelExpr
 }
 
@@ -1345,7 +1310,7 @@ type EdgePattern struct {
 func E() *EdgePattern {
 	return &EdgePattern{
 		direction: EdgeAnyDirection,
-		filler:    &patternFiller{properties: make(map[string]sql.Querier)},
+		filler:    &patternFiller{properties: make(map[string]*Expression)},
 	}
 }
 
@@ -1375,7 +1340,7 @@ func (e *EdgePattern) Named(name string) *EdgePattern {
 
 // Labels sets the edge labels using simple OR logic.
 func (e *EdgePattern) Labels(labels ...string) *EdgePattern {
-	ls := make([]*LabelExpr, len(labels))
+	ls := make([]*labelExpr, len(labels))
 	for i, l := range labels {
 		ls[i] = L(l)
 	}
@@ -1384,25 +1349,25 @@ func (e *EdgePattern) Labels(labels ...string) *EdgePattern {
 }
 
 // LabelExpr sets a complex label expression.
-func (e *EdgePattern) LabelExpr(expr *LabelExpr) *EdgePattern {
+func (e *EdgePattern) LabelExpr(expr *labelExpr) *EdgePattern {
 	e.filler.labelExpr = expr
 	return e
 }
 
 // Property adds a property filter.
-func (e *EdgePattern) Property(key string, value sql.Querier) *EdgePattern {
+func (e *EdgePattern) Property(key string, value *Expression) *EdgePattern {
 	e.filler.properties[key] = value
 	return e
 }
 
 // Properties adds multiple property filters.
-func (e *EdgePattern) Properties(props map[string]sql.Querier) *EdgePattern {
+func (e *EdgePattern) Properties(props map[string]*Expression) *EdgePattern {
 	maps.Copy(e.filler.properties, props)
 	return e
 }
 
 // Where adds a WHERE condition.
-func (e *EdgePattern) Where(condition sql.Querier) *EdgePattern {
+func (e *EdgePattern) Where(condition *sql.Predicate) *EdgePattern {
 	e.filler.where = condition
 	return e
 }
@@ -1413,8 +1378,8 @@ func (e *EdgePattern) Abbreviated() *EdgePattern {
 	return e
 }
 
-// F returns a formatted string for the field of the edge variable.
-func (e *EdgePattern) F(fields ...string) string {
+// F returns the field access expression for the edge variable.
+func (e *EdgePattern) F(fields ...string) *Expression {
 	var b sql.Builder
 	if e.filler.variable != "" {
 		b.Ident(e.filler.variable)
@@ -1422,7 +1387,7 @@ func (e *EdgePattern) F(fields ...string) string {
 	for _, field := range fields {
 		b.WriteByte('.').Ident(field)
 	}
-	return b.String()
+	return Expr(b.String())
 }
 
 // Query returns the edge pattern representation.
@@ -1449,9 +1414,9 @@ func (e *EdgePattern) pattern() {}
 type patternFiller struct {
 	sql.Builder
 	variable   string
-	labelExpr  *LabelExpr
-	properties map[string]sql.Querier
-	where      sql.Querier
+	labelExpr  *labelExpr
+	properties map[string]*Expression
+	where      *sql.Predicate
 }
 
 func (p *patternFiller) Query() (string, []any) {
@@ -1485,16 +1450,16 @@ func (p *patternFiller) Query() (string, []any) {
 	return b.String(), b.GetArgs()
 }
 
-// LabelExpr is a builder for complex label expressions.
-type LabelExpr struct {
+// labelExpr is a builder for complex label expressions.
+type labelExpr struct {
 	sql.Builder
 	depth int
 	fns   []func(*sql.Builder)
 }
 
 // L creates a new label expression with the given label name.
-func L(name string) *LabelExpr {
-	return &LabelExpr{
+func L(name string) *labelExpr {
+	return &labelExpr{
 		fns: []func(*sql.Builder){
 			func(b *sql.Builder) {
 				if name == "" {
@@ -1507,22 +1472,22 @@ func L(name string) *LabelExpr {
 	}
 }
 
-func AndL(labels ...*LabelExpr) *LabelExpr {
-	l := &LabelExpr{}
+func AndL(labels ...*labelExpr) *labelExpr {
+	l := &labelExpr{}
 	return l.Append(func(b *sql.Builder) {
 		l.mayWrap(labels, b, '&')
 	})
 }
 
-func OrL(labels ...*LabelExpr) *LabelExpr {
-	l := &LabelExpr{}
+func OrL(labels ...*labelExpr) *labelExpr {
+	l := &labelExpr{}
 	return l.Append(func(b *sql.Builder) {
 		l.mayWrap(labels, b, '|')
 	})
 }
 
-func NotL(label *LabelExpr) *LabelExpr {
-	l := &LabelExpr{}
+func NotL(label *labelExpr) *labelExpr {
+	l := &labelExpr{}
 	return l.Append(func(b *sql.Builder) {
 		b.WriteByte('!')
 		if len(label.fns) > 1 && l.depth != 0 {
@@ -1536,12 +1501,12 @@ func NotL(label *LabelExpr) *LabelExpr {
 }
 
 // Append adds a function to the label expression builder.
-func (l *LabelExpr) Append(fns ...func(*sql.Builder)) *LabelExpr {
+func (l *labelExpr) Append(fns ...func(*sql.Builder)) *labelExpr {
 	l.fns = append(l.fns, fns...)
 	return l
 }
 
-func (l *LabelExpr) mayWrap(exprs []*LabelExpr, b *sql.Builder, op byte) {
+func (l *labelExpr) mayWrap(exprs []*labelExpr, b *sql.Builder, op byte) {
 	switch n := len(exprs); {
 	case n == 1:
 		b.Join(exprs[0])
@@ -1566,7 +1531,7 @@ func (l *LabelExpr) mayWrap(exprs []*LabelExpr, b *sql.Builder, op byte) {
 }
 
 // String returns the label expression representation.
-func (l *LabelExpr) Query() (string, []any) {
+func (l *labelExpr) Query() (string, []any) {
 	if l.Len() > 0 || len(l.GetArgs()) > 0 {
 		l.Reset()
 		l.ClearArgs()
@@ -1646,7 +1611,7 @@ func ExistsQuery[T *GraphQuery | *Matcher | *GraphPatternBuilder | *PathPattern 
 }
 
 // IsLabeled returns an "IS LABELED" predicate.
-func IsLabeled(element string, labelExpr *LabelExpr) *sql.Predicate {
+func IsLabeled(element string, labelExpr *labelExpr) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
 		b.Ident(element)
 		b.WriteString(" IS LABELED ")
@@ -1657,7 +1622,7 @@ func IsLabeled(element string, labelExpr *LabelExpr) *sql.Predicate {
 }
 
 // IsNotLabeled returns an "IS NOT LABELED" predicate.
-func IsNotLabeled(element string, labelExpr *LabelExpr) *sql.Predicate {
+func IsNotLabeled(element string, labelExpr *labelExpr) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
 		b.Ident(element)
 		b.WriteString(" IS NOT LABELED ")
@@ -1863,4 +1828,67 @@ func ValueQuery(expr *GraphQuery) sql.Querier {
 			b.Dedent().NewLine()
 		})
 	})
+}
+
+// Expr returns an SQL expression that implements the Querier interface.
+func Expr(expr string, args ...any) *Expression {
+	return &Expression{s: expr, args: args}
+}
+
+// VExpr returns a value SQL expression that implements the Querier interface.
+func VExpr(v any) *Expression {
+	return Expr("?", v)
+}
+
+// BExpr returns an boolean SQL expression that implements the Querier interface.
+func BExpr(pred *sql.Predicate) *Expression {
+	expr, args := pred.Query()
+	return Expr(expr, args...)
+}
+
+// PExpr returns an pattern SQL expression that implements the Querier interface.
+func PExpr(p Pattern) *Expression {
+	expr, args := p.Query()
+	return Expr(expr, args...)
+}
+
+type Expression struct {
+	s    string
+	args []any
+	as   string
+}
+
+func (e *Expression) As(alias string) *Expression {
+	e.as = alias
+	return e
+}
+
+func (e *Expression) F(fields ...string) *Expression {
+	var b sql.Builder
+	if e.as != "" {
+		b.Ident(e.as)
+	} else {
+		b.Wrap(func(b *sql.Builder) {
+			b.WriteString(e.s)
+		})
+	}
+	for _, field := range fields {
+		b.WriteByte('.').Ident(field)
+	}
+	return Expr(b.String())
+}
+
+func (e *Expression) String() string {
+	s, _ := e.Query()
+	return s
+}
+
+func (e *Expression) Query() (string, []any) {
+	var b sql.Builder
+	b.WriteString(e.s)
+	if e.as != "" {
+		b.WriteString(" AS ")
+		b.Ident(e.as)
+	}
+	return b.String(), e.args
 }

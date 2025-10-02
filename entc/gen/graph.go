@@ -939,8 +939,8 @@ func addPGNodeElement(pg *schema.PropertyGraph, n *Type) error {
 
 	// Add a default label with all properties
 	// TODO: Customize properties based on requirements
-	label := schema.NewDefaultLabel().SetProperties(schema.NewAllProperties())
-	nodeTable.AddLabel(label)
+	// label := schema.NewDefaultLabel().SetProperties(schema.NewAllProperties())
+	// nodeTable.AddLabel(label)
 
 	pg.AddNodeTable(nodeTable)
 	return nil
@@ -981,7 +981,7 @@ func addPGEdgeElement(pg *schema.PropertyGraph, n *Type, e *Edge) error {
 	// Regular edges (non-polymorphic, non-edge-schema)
 	edgeTable := schema.NewEdgeTable(e.EdgeTableName())
 	// TODO: Customize labels based on requirements
-	edgeTable.AddLabel(schema.NewDefaultLabel().SetProperties(schema.NewAllProperties()))
+	// edgeTable.AddLabel(schema.NewDefaultLabel().SetProperties(schema.NewAllProperties()))
 
 	// Set source and destination keys based on the edge relationship
 	if err := setEdgeKeys(edgeTable, n, e); err != nil {
