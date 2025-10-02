@@ -296,6 +296,11 @@ func Column(expr string, args ...any) *columnExpr {
 	return &columnExpr{expr: sql.Expr(expr, args...)}
 }
 
+// ColumnExpr creates a new column expression from a sql.Querier.
+func ColumnExpr(expr sql.Querier) *columnExpr {
+	return &columnExpr{expr: expr}
+}
+
 // As sets the alias for the column expression.
 func (r *columnExpr) As(alias string) *columnExpr {
 	r.alias = alias

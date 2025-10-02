@@ -334,6 +334,25 @@ func TestBuilder(t *testing.T) {
 				"LET `full_path` = `p` || `q`\n" +
 				"RETURN TO_JSON(`full_path`) AS `results`",
 		},
+		{
+			input: func() *GraphQuery {
+				p := N().Named("p").Labels("Person").Property("Name", sql.Expr("?", "Lee"))
+				a := N().Named("a").Labels("Account")
+				o := E().Named("o").Labels("Owns")
+				match := Match(
+					From(p).Via(o.RightDirection()).To(a),
+				)
+				return Graph("FinGraph").
+					Return(
+						ColumnExpr(ExistsQuery(match)).As("results"),
+					)
+			}(),
+			wantQuery: "GRAPH `FinGraph`\n" +
+				"RETURN EXISTS {\n" +
+				"  MATCH (`p`:`Person` {Name: ?})-[`o`:`Owns`]->(`a`:`Account`)\n" +
+				"} AS `results`",
+			wantArgs: []any{"Lee"},
+		},
 	}
 
 	for i, tt := range tests {
