@@ -1013,6 +1013,27 @@ func isAlias(s string) bool {
 	return strings.Contains(s, " AS ") || strings.Contains(s, " as ")
 }
 
+// Concat concatenates two path patterns with the || operator.
+func Concat(p, q *PathPattern) sql.Querier {
+	return sql.ExprFunc(func(b *sql.Builder) {
+		if p.variable != "" {
+			b.Ident(p.variable)
+		} else {
+			b.Wrap(func(b *sql.Builder) {
+				b.Join(p)
+			})
+		}
+		b.WriteString(" || ")
+		if q.variable != "" {
+			b.Ident(q.variable)
+		} else {
+			b.Wrap(func(b *sql.Builder) {
+				b.Join(q)
+			})
+		}
+	})
+}
+
 type GraphPatternBuilder struct {
 	sql.Builder
 	patterns []sql.Querier
@@ -1188,7 +1209,7 @@ func (p *PathPattern) Query() (string, []any) {
 		b.WriteByte('(')
 	}
 	if p.variable != "" {
-		b.WriteString(p.variable)
+		b.Ident(p.variable)
 		b.WriteString(" = ")
 	}
 	if p.searchPrefix != PrefixAll {

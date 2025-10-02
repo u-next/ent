@@ -1,6 +1,7 @@
 package sqlpgq
 
 import (
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -310,6 +311,28 @@ func TestBuilder(t *testing.T) {
 				"MATCH (`src`:`Account`)((:`Account`)-[:`Transfers`]->(`mid`:`Account` {is_blocked: ?})){1, 2}-[:`Transfers`]->(`dst`:`Account`)\n" +
 				"RETURN `src`.`id` AS `src_account_id`, `dst`.`id` AS `dst_account_id`",
 			wantArgs: []any{true},
+		},
+		{
+			input: func() *GraphQuery {
+				src := N().Named("src").Labels("Account")
+				mid := N().Named("mid").Labels("Account")
+				dst := N().Named("dst").Labels("Account")
+				t1 := E().Named("t1").Labels("Transfers")
+				t2 := E().Named("t2").Labels("Transfers")
+				p := From(src).Via(t1.RightDirection()).To(mid).Variable("p")
+				q := From(mid).Via(t2.RightDirection()).To(dst).Variable("q")
+				fullPath := Assign("full_path", Concat(p, q))
+				return Graph("FinGraph").
+					Match(p, q).
+					Let(fullPath).
+					Return(
+						Column(fmt.Sprintf("TO_JSON(%s)", fullPath.F())).As("results"),
+					)
+			}(),
+			wantQuery: "GRAPH `FinGraph`\n" +
+				"MATCH `p` = (`src`:`Account`)-[`t1`:`Transfers`]->(`mid`:`Account`), `q` = (`mid`:`Account`)-[`t2`:`Transfers`]->(`dst`:`Account`)\n" +
+				"LET `full_path` = `p` || `q`\n" +
+				"RETURN TO_JSON(`full_path`) AS `results`",
 		},
 	}
 
