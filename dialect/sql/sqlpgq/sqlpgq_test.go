@@ -76,7 +76,7 @@ func TestBuilder(t *testing.T) {
 				p := N().Named("p").Labels("Person")
 				a := N().Named("a").Labels("Account")
 				o := E().Named("o").Labels("Owns")
-				iter := For("element").In(Expr("[\"all\",\"some\"]")).WithOffset()
+				iter := For("element").In(sql.Expr("[\"all\",\"some\"]")).WithOffset()
 				return Graph("FinGraph").
 					Match(
 						From(p).Via(o.RightDirection()).To(a),
@@ -104,7 +104,7 @@ func TestBuilder(t *testing.T) {
 				source := N().Named("source").Labels("Account")
 				destination := N().Named("destination").Labels("Account")
 				e := E().Named("e").Labels("Transfers")
-				a := Assign("a", Expr(source.F()))
+				a := Assign("a", sql.Expr(source.F()))
 				return Graph("FinGraph").
 					Match(
 						From(source).Via(e.RightDirection()).To(destination),
@@ -224,7 +224,7 @@ func TestBuilder(t *testing.T) {
 		},
 		{
 			input: func() *GraphQuery {
-				p := N().Named("p").Labels("Person").Property("id", Expr("?", 1))
+				p := N().Named("p").Labels("Person").Property("id", sql.Expr("?", 1))
 				a := N().Named("a").Labels("Account")
 				e := E().Named("e").Labels("Transfers")
 				oa := N().Named("oa").Labels("Account")
@@ -294,7 +294,7 @@ func TestBuilder(t *testing.T) {
 				src := N().Named("src").Labels("Account")
 				dst := N().Named("dst").Labels("Account")
 				transfer := E().Labels("Transfers")
-				subpath := From(N().Labels("Account")).Via(transfer.RightDirection()).To(N().Named("mid").Labels("Account").Property("is_blocked", Expr("?", true)))
+				subpath := From(N().Labels("Account")).Via(transfer.RightDirection()).To(N().Named("mid").Labels("Account").Property("is_blocked", sql.Expr("?", true)))
 				lower := 1
 				upper := 2
 				return Graph("FinGraph").

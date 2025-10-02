@@ -24,10 +24,9 @@ func Graph(name string) *GraphQuery {
 	}
 }
 
-// Graph sets the property graph name.
-func (g *GraphQuery) Graph(name string) *GraphQuery {
-	g.graph = name
-	return g
+// GraphExpr returns a new graph expression.
+func GraphExpr() *GraphQuery {
+	return &GraphQuery{}
 }
 
 // Append adds a linear query statement to the multi-linear query.
@@ -54,11 +53,6 @@ func (g *GraphQuery) OptionalMatch(patterns ...Pattern) *GraphQuery {
 // OptionalMatchWithHint adds an OPTIONAL MATCH statement with a hint to the linear query.
 func (g *GraphQuery) OptionalMatchWithHint(hint sqlhint.JoinHint, patterns ...Pattern) *GraphQuery {
 	return g.Append(OptionalMatch(patterns...).Hint(hint))
-}
-
-// Where adds a WHERE clause to the last MATCH statement.
-func (g *GraphQuery) Where(p *sql.Predicate) *GraphQuery {
-	return g.Append(Where(p))
 }
 
 // Filter adds a FILTER statement to the linear query.
@@ -172,9 +166,9 @@ func (g *GraphQuery) Query() (string, []any) {
 	if g.graph != "" {
 		g.WriteString("GRAPH ")
 		g.Ident(g.graph)
+		g.NewLine()
 	}
 	if len(g.stmts) > 0 {
-		g.NewLine()
 		g.JoinNewLine(g.stmts...)
 	}
 	return g.String(), g.GetArgs()
@@ -292,14 +286,14 @@ func AllColumns() *columnExpr {
 	return &columnExpr{star: true}
 }
 
-// Const creates a new constant column expression.
+// FIXME: Const creates a new constant column expression.
 func Const(v any) *columnExpr {
-	return &columnExpr{expr: Expr("?", v)}
+	return &columnExpr{expr: sql.Expr("?", v)}
 }
 
 // Column creates a new column expression.
 func Column(expr string, args ...any) *columnExpr {
-	return &columnExpr{expr: Expr(expr, args...)}
+	return &columnExpr{expr: sql.Expr(expr, args...)}
 }
 
 // As sets the alias for the column expression.
@@ -867,23 +861,6 @@ func ExceptDistinct() SetOperation {
 	}
 }
 
-// Queries are list of queries join with space between them.
-type Queries []sql.Querier
-
-// Query returns query representation of Queriers.
-func (n Queries) Query() (string, []any) {
-	b := &sql.Builder{}
-	for i := range n {
-		if i > 0 {
-			b.Pad()
-		}
-		query, args := n[i].Query()
-		b.WriteString(query)
-		b.Args(args...)
-	}
-	return b.String(), b.GetArgs()
-}
-
 // GraphTableWrapper is a builder for GRAPH_TABLE operator in SQL queries.
 type GraphTableWrapper struct {
 	*GraphQuery
@@ -892,9 +869,9 @@ type GraphTableWrapper struct {
 }
 
 // GraphTable creates a new GRAPH_TABLE operator builder.
-func GraphTable(q *GraphQuery) *GraphTableWrapper {
+func GraphTable(query *GraphQuery) *GraphTableWrapper {
 	return &GraphTableWrapper{
-		GraphQuery: q,
+		GraphQuery: query,
 	}
 }
 
@@ -1036,26 +1013,34 @@ func isAlias(s string) bool {
 	return strings.Contains(s, " AS ") || strings.Contains(s, " as ")
 }
 
-type WhereBuilder struct {
+type GraphPatternBuilder struct {
 	sql.Builder
-	predicate *sql.Predicate
+	patterns []sql.Querier
+	where    *sql.Predicate
 }
 
-// Where creates a new WHERE clause builder.
-func Where(pred *sql.Predicate) *WhereBuilder {
-	return &WhereBuilder{predicate: pred}
+func GraphPattern(patterns ...Pattern) *GraphPatternBuilder {
+	return (&GraphPatternBuilder{}).AppendPatterns(patterns...)
 }
 
-func (w *WhereBuilder) Query() (string, []any) {
-	w.WriteString("WHERE")
-	if w.predicate != nil {
-		w.Pad()
-		w.Join(w.predicate)
+func (g *GraphPatternBuilder) AppendPatterns(patterns ...Pattern) *GraphPatternBuilder {
+	for _, p := range patterns {
+		g.patterns = append(g.patterns, p)
+	}
+	return g
+}
+
+func (w *GraphPatternBuilder) Query() (string, []any) {
+	w.JoinComma(w.patterns...)
+	w.NewLine()
+	if w.where != nil {
+		w.WriteString("WHERE ")
+		w.Join(w.where)
 	}
 	return w.String(), w.GetArgs()
 }
 
-func (w *WhereBuilder) stmt() {}
+func (w *GraphPatternBuilder) pattern() {}
 
 // Pattern is an interface for graph patterns.
 type Pattern interface {
@@ -1596,564 +1581,141 @@ var pathModes = [...]string{
 	ModeTrail:   "TRAIL",
 }
 
-// Predicate represents a GQL predicate expression.
-type Predicate struct {
-	sql.Builder
-	depth int
-	fns   []func(*sql.Builder)
-}
-
-// P creates a new GQL predicate.
-func P(fns ...func(*sql.Builder)) *Predicate {
-	return &Predicate{fns: fns}
-}
-
-// Raw allows injecting raw GQL expressions in the predicate.
-func (p *Predicate) Raw(query string, args ...any) *Predicate {
-	p.WriteString(query)
-	p.Args(args...)
-	return p
-}
-
-// And appends the AND operator to the predicate.
-func (p *Predicate) And() *Predicate {
-	p.WriteString(" AND ")
-	return p
-}
-
-// Or appends the OR operator to the predicate.
-func (p *Predicate) Or() *Predicate {
-	p.WriteString(" OR ")
-	return p
-}
-
-// Not wraps the predicate with the NOT operator.
-func (p *Predicate) Not() *Predicate {
-	p.Wrap(func(b *sql.Builder) {
-		b.WriteString("NOT ")
-		b.WriteString(p.String())
-		b.Args(p.GetArgs()...)
-	})
-	return p
-}
-
-// Standard comparison predicates
-
-// EQ adds a "=" predicate.
-func (p *Predicate) EQ(column string, arg any) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.Ident(column).WriteOp(sql.OpEQ).Arg(arg)
-	})
-}
-
-// NEQ adds a "<>" predicate.
-func (p *Predicate) NEQ(column string, arg any) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.Ident(column).WriteOp(sql.OpNEQ).Arg(arg)
-	})
-}
-
-// GT adds a ">" predicate.
-func (p *Predicate) GT(column string, arg any) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.Ident(column).WriteOp(sql.OpGT).Arg(arg)
-	})
-}
-
-// GTE adds a ">=" predicate.
-func (p *Predicate) GTE(column string, arg any) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.Ident(column).WriteOp(sql.OpGTE).Arg(arg)
-	})
-}
-
-// LT adds a "<" predicate.
-func (p *Predicate) LT(column string, arg any) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.Ident(column).WriteOp(sql.OpLT).Arg(arg)
-	})
-}
-
-// LTE adds a "<=" predicate.
-func (p *Predicate) LTE(column string, arg any) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.Ident(column).WriteOp(sql.OpLTE).Arg(arg)
-	})
-}
-
-// In adds an "IN" predicate.
-func (p *Predicate) In(column string, args ...any) *Predicate {
-	// If no arguments were provided, append the FALSE constant, since
-	// we cannot apply "IN ()". This will make this predicate falsy.
-	if len(args) == 0 {
-		return p.False()
-	}
-	return p.Append(func(b *sql.Builder) {
-		b.Ident(column).WriteOp(sql.OpIn)
-		b.Wrap(func(b *sql.Builder) {
-			if s, ok := args[0].(*sql.Selector); ok {
-				b.Join(s)
-			} else {
-				b.Args(args...)
-			}
+// InQuery returns the `IN` subquery predicate for the given expression.
+func InQuery(value any, expr *GraphQuery) *sql.Predicate {
+	return sql.P(func(b *sql.Builder) {
+		b.Arg(value)
+		b.WriteString(" IN ")
+		b.WrapBraces(func(b *sql.Builder) {
+			b.Indent().NewLine()
+			b.Join(expr)
+			b.Dedent().NewLine()
 		})
 	})
 }
 
-// NotIn adds a "NOT IN" predicate.
-func (p *Predicate) NotIn(column string, args ...any) *Predicate {
-	// If no arguments were provided, append the NOT FALSE constant, since
-	// we cannot apply "NOT IN ()". This will make this predicate truthy.
-	if len(args) == 0 {
-		return Not(p.False())
-	}
-	return p.Append(func(b *sql.Builder) {
-		b.Ident(column).WriteOp(sql.OpNotIn)
-		b.Wrap(func(b *sql.Builder) {
-			if s, ok := args[0].(*sql.Selector); ok {
-				b.Join(s)
-			} else {
-				b.Args(args...)
-			}
+// NotInQuery returns the `NOT IN` subquery predicate for the given expression.
+func NotInQuery(value any, expr *GraphQuery) *sql.Predicate {
+	return sql.P(func(b *sql.Builder) {
+		b.Arg(value)
+		b.WriteString(" NOT IN ")
+		b.WrapBraces(func(b *sql.Builder) {
+			b.Indent().NewLine()
+			b.Join(expr)
+			b.Dedent().NewLine()
 		})
 	})
 }
 
-// Like adds a "LIKE" predicate.
-func (p *Predicate) Like(column, pattern string) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.Ident(column).WriteOp(sql.OpLike).Arg(pattern)
-	})
-}
-
-// IsNull adds an "IS NULL" predicate.
-func (p *Predicate) IsNull(column string) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.Ident(column).WriteOp(sql.OpIsNull)
-	})
-}
-
-// NotNull adds an "IS NOT NULL" predicate.
-func (p *Predicate) NotNull(column string) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.Ident(column).WriteOp(sql.OpNotNull)
-	})
-}
-
-// Graph-specific predicates
-
-// IsLabeled adds an "IS LABELED" predicate.
-func (p *Predicate) IsLabeled(element string, labelExpr *LabelExpr) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.WriteString(element).WriteString(" IS LABELED ")
-		if labelExpr != nil {
-			b.Join(labelExpr)
-		}
-	})
-}
-
-// IsNotLabeled adds an "IS NOT LABELED" predicate.
-func (p *Predicate) IsNotLabeled(element string, labelExpr *LabelExpr) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.WriteString(element).WriteString(" IS NOT LABELED ")
-		if labelExpr != nil {
-			b.Join(labelExpr)
-		}
-	})
-}
-
-// IsSource adds an "IS SOURCE" predicate.
-func (p *Predicate) IsSource(node, edge string) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.WriteString(node).WriteString(" IS SOURCE ")
-		if edge != "" {
-			b.WriteString("OF ").WriteString(edge)
-		}
-	})
-}
-
-// IsNotSource adds an "IS NOT SOURCE" predicate.
-func (p *Predicate) IsNotSource(node, edge string) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.WriteString(node).WriteString(" IS NOT SOURCE ")
-		if edge != "" {
-			b.WriteString("OF ").WriteString(edge)
-		}
-	})
-}
-
-// IsDestination adds an "IS DESTINATION" predicate.
-func (p *Predicate) IsDestination(node, edge string) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.WriteString(node).WriteString(" IS DESTINATION ")
-		if edge != "" {
-			b.WriteString("OF ").WriteString(edge)
-		}
-	})
-}
-
-// IsNotDestination adds an "IS NOT DESTINATION" predicate.
-func (p *Predicate) IsNotDestination(node, edge string) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.WriteString(node).WriteString(" IS NOT DESTINATION ")
-		if edge != "" {
-			b.WriteString("OF ").WriteString(edge)
-		}
-	})
-}
-
-// Graph functions
-
-// AllDifferent adds an "ALL_DIFFERENT" predicate.
-func (p *Predicate) AllDifferent(elements ...string) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.WriteString("ALL_DIFFERENT(")
-		for i, element := range elements {
-			if i > 0 {
-				b.Comma()
-			}
-			b.WriteString(element)
-		}
-		b.WriteByte(')')
-	})
-}
-
-// Same adds a "SAME" predicate.
-func (p *Predicate) Same(elements ...string) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.WriteString("SAME(")
-		for i, element := range elements {
-			if i > 0 {
-				b.Comma()
-			}
-			b.WriteString(element)
-		}
-		b.WriteByte(')')
-	})
-}
-
-// PropertyExists adds a "PROPERTY_EXISTS" predicate.
-func (p *Predicate) PropertyExists(element, property string) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.WriteString("PROPERTY_EXISTS(").WriteString(element).Comma().WriteString(property).WriteByte(')')
-	})
-}
-
-// EQ returns a "=" predicate.
-func EQ(column string, arg any) *Predicate {
-	return P().EQ(column, arg)
-}
-
-// NEQ returns a "<>" predicate.
-func NEQ(column string, arg any) *Predicate {
-	return P().NEQ(column, arg)
-}
-
-// GT returns a ">" predicate.
-func GT(column string, arg any) *Predicate {
-	return P().GT(column, arg)
-}
-
-// GTE returns a ">=" predicate.
-func GTE(column string, arg any) *Predicate {
-	return P().GTE(column, arg)
-}
-
-// LT returns a "<" predicate.
-func LT(column string, arg any) *Predicate {
-	return P().LT(column, arg)
-}
-
-// LTE returns a "<=" predicate.
-func LTE(column string, arg any) *Predicate {
-	return P().LTE(column, arg)
-}
-
-// In returns an "IN" predicate.
-func In(column string, args ...any) *Predicate {
-	return P().In(column, args...)
-}
-
-// NotIn returns a "NOT IN" predicate.
-func NotIn(column string, args ...any) *Predicate {
-	return P().NotIn(column, args...)
-}
-
-// Like returns a "LIKE" predicate.
-func Like(column, pattern string) *Predicate {
-	return P().Like(column, pattern)
-}
-
-// IsNull returns an "IS NULL" predicate.
-func IsNull(column string) *Predicate {
-	return P().IsNull(column)
-}
-
-// NotNull returns an "IS NOT NULL" predicate.
-func NotNull(column string) *Predicate {
-	return P().NotNull(column)
-}
-
-// Logical operations and utilities
-
-// And combines all given predicates with AND between them.
-func And(preds ...*Predicate) *Predicate {
-	p := P()
-	return p.Append(func(b *sql.Builder) {
-		p.mayWrap(preds, b, "AND")
-	})
-}
-
-// Or combines all given predicates with OR between them.
-func Or(preds ...*Predicate) *Predicate {
-	p := P()
-	return p.Append(func(b *sql.Builder) {
-		p.mayWrap(preds, b, "OR")
-	})
-}
-
-// Not wraps the given predicate with the NOT operator.
-func Not(pred *Predicate) *Predicate {
-	return P().Not().Append(func(b *sql.Builder) {
-		b.Wrap(func(b *sql.Builder) {
-			b.Join(pred)
-		})
-	})
-}
-
-// False appends the FALSE keyword to the predicate.
-func False() *Predicate {
-	return P().False()
-}
-
-// False appends FALSE to the predicate.
-func (p *Predicate) False() *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.WriteString("FALSE")
-	})
-}
-
-// True appends the TRUE keyword to the predicate.
-func True() *Predicate {
-	return P().True()
-}
-
-// True appends TRUE to the predicate.
-func (p *Predicate) True() *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.WriteString("TRUE")
-	})
-}
-
-// ExprP creates a new predicate from the given expression.
-func ExprP(expr string, args ...any) *Predicate {
-	return P(func(b *sql.Builder) {
-		b.Join(Expr(expr, args...))
-	})
-}
-
-// Exists returns the EXISTS predicate.
-func Exists(query sql.Querier) *Predicate {
-	return P().Exists(query)
-}
-
-// Exists appends the EXISTS predicate with the given query.
-func (p *Predicate) Exists(query sql.Querier) *Predicate {
-	return p.Append(func(b *sql.Builder) {
+// ExistsQuery returns an `EXISTS` subquery predicate for the given expression.
+func ExistsQuery[T *GraphQuery | *Matcher | *GraphPatternBuilder | *PathPattern | *NodePattern | *EdgePattern](expr T) *sql.Predicate {
+	return sql.P(func(b *sql.Builder) {
 		b.WriteString("EXISTS ")
 		b.WrapBraces(func(b *sql.Builder) {
-			b.Join(query)
+			b.Indent().NewLine()
+			b.Join(sql.Querier(expr))
+			b.Dedent().NewLine()
 		})
 	})
 }
-
-// InSubquery adds an "IN" predicate with a subquery.
-func (p *Predicate) InSubquery(value string, query sql.Querier) *Predicate {
-	p.Ident(value).WriteOp(sql.OpIn)
-	p.WrapBraces(func(b *sql.Builder) {
-		b.Join(query)
-	})
-	return p
-}
-
-// NotInSubquery adds a "NOT IN" predicate with a subquery.
-func (p *Predicate) NotInSubquery(value string, query sql.Querier) *Predicate {
-	p.Ident(value).WriteOp(sql.OpNotIn)
-	p.WrapBraces(func(b *sql.Builder) {
-		b.Join(query)
-	})
-	return p
-}
-
-// NotExists returns the NOT EXISTS predicate.
-func NotExists(query sql.Querier) *Predicate {
-	return P().NotExists(query)
-}
-
-// InSubquery returns an "IN" predicate with a subquery.
-func InSubquery(value string, query sql.Querier) *Predicate {
-	return P().InSubquery(value, query)
-}
-
-// NotInSubquery returns a "NOT IN" predicate with a subquery.
-func NotInSubquery(value string, query sql.Querier) *Predicate {
-	return P().NotInSubquery(value, query)
-}
-
-// NotExists appends the NOT EXISTS predicate with the given query.
-func (p *Predicate) NotExists(query sql.Querier) *Predicate {
-	return p.Append(func(b *sql.Builder) {
-		b.WriteString("NOT EXISTS ")
-		b.Wrap(func(b *sql.Builder) {
-			b.Join(query)
-		})
-	})
-}
-
-// Append appends a new function to the predicate callbacks.
-// The callback list are executed on call to Query.
-func (p *Predicate) Append(f func(*sql.Builder)) *Predicate {
-	p.fns = append(p.fns, f)
-	return p
-}
-
-// clone returns a shallow clone of p.
-func (p *Predicate) clone() *Predicate {
-	if p == nil {
-		return p
-	}
-	return &Predicate{fns: append([]func(*sql.Builder){}, p.fns...)}
-}
-
-func (p *Predicate) mayWrap(preds []*Predicate, b *sql.Builder, op string) {
-	switch n := len(preds); {
-	case n == 1:
-		b.Join(preds[0])
-		return
-	case n > 1 && p.depth != 0:
-		b.WriteByte('(')
-		defer b.WriteByte(')')
-	}
-	for i := range preds {
-		preds[i].depth = p.depth + 1
-		if i > 0 {
-			b.WriteByte(' ')
-			b.WriteString(op)
-			b.WriteByte(' ')
-		}
-		if len(preds[i].fns) > 1 {
-			b.Wrap(func(b *sql.Builder) {
-				b.Join(preds[i])
-			})
-		} else {
-			b.Join(preds[i])
-		}
-	}
-}
-
-// Query returns query representation of a predicate.
-func (p *Predicate) Query() (string, []any) {
-	if p.Len() > 0 || len(p.GetArgs()) > 0 {
-		p.Reset()
-		p.ClearArgs()
-	}
-	for _, f := range p.fns {
-		f(&p.Builder)
-	}
-	return p.String(), p.GetArgs()
-}
-
-// arg calls Builder.Arg, but wraps complex queries with parens when needed.
-func (*Predicate) arg(b *sql.Builder, a any) {
-	switch a.(type) {
-	case *GraphQuery, *Matcher, *FilterBuilder, *ReturnBuilder:
-		// Wrap complex query types in parentheses
-		b.Wrap(func(b *sql.Builder) {
-			b.Arg(a)
-		})
-	default:
-		b.Arg(a)
-	}
-}
-
-// Graph-specific standalone predicates
 
 // IsLabeled returns an "IS LABELED" predicate.
-func IsLabeled(element string, labelExpr *LabelExpr) *Predicate {
-	return P().IsLabeled(element, labelExpr)
+func IsLabeled(element string, labelExpr *LabelExpr) *sql.Predicate {
+	return sql.P(func(b *sql.Builder) {
+		b.Ident(element)
+		b.WriteString(" IS LABELED ")
+		if labelExpr != nil {
+			b.Join(labelExpr)
+		}
+	})
 }
 
 // IsNotLabeled returns an "IS NOT LABELED" predicate.
-func IsNotLabeled(element string, labelExpr *LabelExpr) *Predicate {
-	return P().IsNotLabeled(element, labelExpr)
+func IsNotLabeled(element string, labelExpr *LabelExpr) *sql.Predicate {
+	return sql.P(func(b *sql.Builder) {
+		b.Ident(element)
+		b.WriteString(" IS NOT LABELED ")
+		if labelExpr != nil {
+			b.Join(labelExpr)
+		}
+	})
 }
 
 // IsSource returns an "IS SOURCE" predicate.
-func IsSource(node, edge string) *Predicate {
-	return P().IsSource(node, edge)
+func IsSource(node, edge string) *sql.Predicate {
+	return sql.P(func(b *sql.Builder) {
+		b.Ident(node)
+		b.WriteString(" IS SOURCE OF ")
+		b.Ident(edge)
+	})
 }
 
 // IsNotSource returns an "IS NOT SOURCE" predicate.
-func IsNotSource(node, edge string) *Predicate {
-	return P().IsNotSource(node, edge)
+func IsNotSource(node, edge string) *sql.Predicate {
+	return sql.P(func(b *sql.Builder) {
+		b.Ident(node)
+		b.WriteString(" IS NOT SOURCE OF ")
+		b.Ident(edge)
+	})
 }
 
 // IsDestination returns an "IS DESTINATION" predicate.
-func IsDestination(node, edge string) *Predicate {
-	return P().IsDestination(node, edge)
+func IsDestination(node, edge string) *sql.Predicate {
+	return sql.P(func(b *sql.Builder) {
+		b.Ident(node)
+		b.WriteString(" IS DESTINATION OF ")
+		b.Ident(edge)
+	})
 }
 
 // IsNotDestination returns an "IS NOT DESTINATION" predicate.
-func IsNotDestination(node, edge string) *Predicate {
-	return P().IsNotDestination(node, edge)
+func IsNotDestination(node, edge string) *sql.Predicate {
+	return sql.P(func(b *sql.Builder) {
+		b.Ident(node)
+		b.WriteString(" IS NOT DESTINATION OF ")
+		b.Ident(edge)
+	})
 }
 
 // AllDifferent returns an "ALL_DIFFERENT" predicate.
-func AllDifferent(elements ...string) *Predicate {
-	return P().AllDifferent(elements...)
+func AllDifferent(elements ...string) *sql.Predicate {
+	return sql.P(func(b *sql.Builder) {
+		b.WriteString("ALL_DIFFERENT")
+		b.Wrap(func(b *sql.Builder) {
+			for i, element := range elements {
+				if i > 0 {
+					b.Comma()
+				}
+				b.WriteString(element)
+			}
+		})
+	})
 }
 
 // Same returns a "SAME" predicate.
-func Same(elements ...string) *Predicate {
-	return P().Same(elements...)
+func Same(elements ...string) *sql.Predicate {
+	return sql.P(func(b *sql.Builder) {
+		b.WriteString("SAME")
+		b.Wrap(func(b *sql.Builder) {
+			for i, element := range elements {
+				if i > 0 {
+					b.Comma()
+				}
+				b.WriteString(element)
+			}
+		})
+	})
 }
 
 // PropertyExists returns a "PROPERTY_EXISTS" predicate.
-func PropertyExists(element, property string) *Predicate {
-	return P().PropertyExists(element, property)
-}
-
-// Raw returns a raw GQL query that is placed as-is in the query.
-func Raw(s string) sql.Querier { return &raw{s} }
-
-type raw struct{ s string }
-
-func (r *raw) Query() (string, []any) { return r.s, nil }
-
-// Expr returns an GQL expression that implements the sql.Querier interface.
-func Expr(exr string, args ...any) sql.Querier { return &expr{s: exr, args: args} }
-
-type expr struct {
-	s    string
-	args []any
-}
-
-func (e *expr) Query() (string, []any) { return e.s, e.args }
-
-// ExprFunc returns an expression function that implements the sql.Querier interface.
-func ExprFunc(fn func(*sql.Builder)) sql.Querier {
-	return &exprFunc{fn: fn}
-}
-
-type exprFunc struct {
-	sql.Builder
-	fn func(*sql.Builder)
-}
-
-func (e *exprFunc) Query() (string, []any) {
-	b := e.Builder.Clone()
-	e.fn(&b)
-	return b.Query()
+func PropertyExists(element, property string) *sql.Predicate {
+	return sql.P(func(b *sql.Builder) {
+		b.WriteString("PROPERTY_EXISTS(")
+		b.WriteString(element)
+		b.Comma()
+		b.WriteString(property)
+		b.WriteByte(')')
+	})
 }
 
 // FuncBuilder is a builder for GQL functions.
@@ -2253,42 +1815,26 @@ func SourceNodeID(edge any) *FuncBuilder {
 	return Func("SOURCE_NODE_ID").Args(edge)
 }
 
-// ArraySubqueryBuilder is a builder for ARRAY subqueries.
-type ArraySubqueryBuilder struct {
-	sql.Builder
-	query sql.Querier
-}
-
-// ArraySubquery creates a new ARRAY subquery builder.
-func ArraySubquery(query sql.Querier) *ArraySubqueryBuilder {
-	return &ArraySubqueryBuilder{query: query}
-}
-
-// Query returns the ARRAY subquery representation.
-func (a *ArraySubqueryBuilder) Query() (string, []any) {
-	a.WriteString("ARRAY ")
-	a.WrapBraces(func(b *sql.Builder) {
-		b.Join(a.query)
+// ArrayQuery returns an ARRAY expression for the given subquery.
+func ArrayQuery(expr *GraphQuery) sql.Querier {
+	return sql.ExprFunc(func(b *sql.Builder) {
+		b.WriteString("ARRAY ")
+		b.WrapBraces(func(b *sql.Builder) {
+			b.Indent().NewLine()
+			b.Join(expr)
+			b.Dedent().NewLine()
+		})
 	})
-	return a.String(), a.GetArgs()
 }
 
-// ValueSubqueryBuilder is a builder for VALUE subqueries.
-type ValueSubqueryBuilder struct {
-	sql.Builder
-	query sql.Querier
-}
-
-// ValueSubquery creates a new VALUE subquery builder.
-func ValueSubquery(query sql.Querier) *ValueSubqueryBuilder {
-	return &ValueSubqueryBuilder{query: query}
-}
-
-// Query returns the VALUE subquery representation.
-func (v *ValueSubqueryBuilder) Query() (string, []any) {
-	v.WriteString("VALUE ")
-	v.WrapBraces(func(b *sql.Builder) {
-		b.Join(v.query)
+// ValueQuery returns a VALUE expression for the given subquery.
+func ValueQuery(expr *GraphQuery) sql.Querier {
+	return sql.ExprFunc(func(b *sql.Builder) {
+		b.WriteString("VALUE ")
+		b.WrapBraces(func(b *sql.Builder) {
+			b.Indent().NewLine()
+			b.Join(expr)
+			b.Dedent().NewLine()
+		})
 	})
-	return v.String(), v.GetArgs()
 }

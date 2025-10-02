@@ -770,22 +770,6 @@ func ExprP(exr string, args ...any) *Predicate {
 	})
 }
 
-func UnaryExprP(op Op, exr string, args ...any) *Predicate {
-	return P(func(b *Builder) {
-		b.WriteOp(op)
-		b.Join(Expr(exr, args...))
-	})
-}
-
-func BinaryExprP(left string, op Op, right string, args ...any) *Predicate {
-	return P(func(b *Builder) {
-		b.Join(Expr(left))
-		b.WriteOp(op)
-		b.Join(Expr(right))
-		b.Args(args...)
-	})
-}
-
 // Or combines all given predicates with OR between them.
 //
 //	Or(EQ("name", "foo"), EQ("name", "bar"))
