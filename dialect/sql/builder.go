@@ -3401,7 +3401,7 @@ func (b *Builder) join(qs []Querier, sep string) *Builder {
 
 // Wrap gets a callback, and wraps its result with parentheses.
 func (b *Builder) Wrap(f func(*Builder)) *Builder {
-	nb := &Builder{dialect: b.dialect, total: b.total, sb: &strings.Builder{}}
+	nb := &Builder{dialect: b.dialect, total: b.total, sb: &strings.Builder{}, depth: b.depth}
 	nb.WriteByte('(')
 	f(nb)
 	nb.WriteByte(')')
@@ -3413,7 +3413,7 @@ func (b *Builder) Wrap(f func(*Builder)) *Builder {
 
 // WrapBraces gets a callback, and wraps its result with braces.
 func (b *Builder) WrapBraces(f func(*Builder)) *Builder {
-	nb := &Builder{total: b.total, sb: &strings.Builder{}}
+	nb := &Builder{dialect: b.dialect, total: b.total, sb: &strings.Builder{}, depth: b.depth}
 	nb.WriteByte('{')
 	f(nb)
 	nb.WriteByte('}')
