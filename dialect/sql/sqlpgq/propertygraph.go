@@ -53,13 +53,12 @@ func NewLabel(name string) *Label {
 // PropertyGraphBuilder is a builder for `CREATE PROPERTY GRAPH` statement.
 type PropertyGraphBuilder struct {
 	sql.Builder
-	schema     string              // property graph schema
+	schema     string              // optional schema prefix
 	name       string              // property graph name
 	exists     bool                // check existence
-	nodeTablex []*NodeTableBuilder // node table builders
-	edgeTablex []*EdgeTableBuilder // edge table builders
-	options    []string            // property graph options
-	comment    string              // property graph comment
+	replace    bool                // replace existing property graph
+	nodeTables []*NodeTableBuilder // node table builders
+	edgeTables []*EdgeTableBuilder // edge table builders
 }
 
 // CreatePropertyGraph returns a query builder for the `CREATE PROPERTY GRAPH` statement.
@@ -78,218 +77,92 @@ func CreatePropertyGraph(name string) *PropertyGraphBuilder {
 	return &PropertyGraphBuilder{name: name}
 }
 
-// Schema sets the database schema name for the property graph.
-func (pg *PropertyGraphBuilder) Schema(name string) *PropertyGraphBuilder {
-	pg.schema = name
-	return pg
-}
-
 // IfNotExists appends the `IF NOT EXISTS` clause to the `CREATE PROPERTY GRAPH` statement.
 func (pg *PropertyGraphBuilder) IfNotExists() *PropertyGraphBuilder {
 	pg.exists = true
 	return pg
 }
 
+// OrReplace appends the `OR REPLACE` clause to the `CREATE PROPERTY GRAPH` statement.
+func (pg *PropertyGraphBuilder) OrReplace() *PropertyGraphBuilder {
+	pg.replace = true
+	return pg
+}
+
 // NodeTable appends node tables to the property graph.
 func (pg *PropertyGraphBuilder) NodeTable(nts ...*NodeTableBuilder) *PropertyGraphBuilder {
-	pg.nodeTablex = append(pg.nodeTablex, nts...)
+	pg.nodeTables = append(pg.nodeTables, nts...)
 	return pg
 }
 
 // EdgeTable appends edge tables to the property graph.
 func (pg *PropertyGraphBuilder) EdgeTable(ets ...*EdgeTableBuilder) *PropertyGraphBuilder {
-	pg.edgeTablex = append(pg.edgeTablex, ets...)
+	pg.edgeTables = append(pg.edgeTables, ets...)
 	return pg
 }
 
-// Options sets the property graph options.
-func (pg *PropertyGraphBuilder) Options(opts ...string) *PropertyGraphBuilder {
-	pg.options = append(pg.options, opts...)
+// SetSchema sets the optional schema prefix for the property graph.
+func (pg *PropertyGraphBuilder) SetSchema(schema string) *PropertyGraphBuilder {
+	pg.schema = schema
 	return pg
 }
 
-// Comment sets the property graph comment.
-func (pg *PropertyGraphBuilder) Comment(comment string) *PropertyGraphBuilder {
-	pg.comment = comment
-	return pg
+func (pg *PropertyGraphBuilder) Name() string {
+	return pg.name
 }
 
 // Query returns query representation of a `CREATE PROPERTY GRAPH` statement.
 func (pg *PropertyGraphBuilder) Query() (string, []any) {
-	pg.WriteString("CREATE PROPERTY GRAPH ")
+	pg.WriteString("CREATE ")
+	if pg.replace {
+		pg.WriteString("OR REPLACE ")
+	}
+	pg.WriteString("PROPERTY GRAPH ")
 	if pg.exists {
 		pg.WriteString("IF NOT EXISTS ")
 	}
-	pg.writeSchema(pg.schema)
+	pg.WriteSchema(pg.schema)
 	pg.Ident(pg.name)
 
-	if len(pg.nodeTablex) > 0 || len(pg.edgeTablex) > 0 {
-		pg.NewLine().WriteString("NODE TABLES (")
-		for i, nt := range pg.nodeTablex {
-			if i > 0 {
-				pg.Comma()
-			}
-			pg.NewLine().Indent(1)
-			pg.writeNodeTable(nt)
-		}
-		pg.NewLine().WriteByte(')')
-
-		if len(pg.edgeTablex) > 0 {
-			pg.NewLine().WriteString("EDGE TABLES (")
-			for i, et := range pg.edgeTablex {
+	// Add node and edge tables
+	if len(pg.nodeTables) > 0 || len(pg.edgeTables) > 0 {
+		pg.Indent()
+		pg.NewLine().WriteString("NODE TABLES ")
+		pg.Wrap(func(b *sql.Builder) {
+			pg.Indent()
+			for i, nt := range pg.nodeTables {
 				if i > 0 {
 					pg.Comma()
 				}
-				pg.NewLine().Indent(1)
-				pg.writeEdgeTable(et)
+				pg.NewLine()
+				pg.Join(nt)
 			}
-			pg.NewLine().WriteByte(')')
+			pg.Dedent().NewLine()
+		})
+		if len(pg.edgeTables) > 0 {
+			pg.NewLine().WriteString("EDGE TABLES ")
+			pg.Wrap(func(b *sql.Builder) {
+				pg.Indent()
+				for i, et := range pg.edgeTables {
+					if i > 0 {
+						pg.Comma()
+					}
+					pg.NewLine()
+					pg.writeEdgeTable(et)
+				}
+				pg.Dedent().NewLine()
+			})
 		}
-	}
-
-	if len(pg.options) > 0 {
-		pg.NewLine().WriteString("OPTIONS (")
-		for i, opt := range pg.options {
-			if i > 0 {
-				pg.Comma()
-			}
-			pg.WriteString(opt)
-		}
-		pg.WriteByte(')')
+		pg.Dedent()
+		pg.WriteByte(';')
 	}
 
 	return pg.String(), pg.GetArgs()
 }
 
-// writeSchema writes the schema prefix if provided.
-func (pg *PropertyGraphBuilder) writeSchema(schema string) {
-	if schema != "" {
-		pg.Ident(schema).WriteByte('.')
-	}
-}
-
-// writeNodeTable writes a node table definition.
-func (pg *PropertyGraphBuilder) writeNodeTable(nt *NodeTableBuilder) {
-	pg.Ident(nt.tableName)
-	if nt.alias != "" {
-		pg.WriteString(" AS ").Ident(nt.alias)
-	}
-
-	if nt.key != nil {
-		pg.NewLine().Indent(2).WriteString("KEY (")
-		for i, col := range nt.key.Columns {
-			if i > 0 {
-				pg.Comma()
-			}
-			pg.Ident(col)
-		}
-		pg.WriteByte(')')
-	}
-
-	if len(nt.labels) > 0 {
-		pg.NewLine().Indent(2).WriteString("LABEL (")
-		for i, label := range nt.labels {
-			if i > 0 {
-				pg.Comma()
-			}
-			pg.WriteString(label.Name)
-			if len(label.Properties) > 0 {
-				pg.WriteString(" PROPERTIES (")
-				for j, prop := range label.Properties {
-					if j > 0 {
-						pg.Comma()
-					}
-					pg.Ident(prop)
-				}
-				pg.WriteByte(')')
-			}
-		}
-		pg.WriteByte(')')
-	}
-}
-
 // writeEdgeTable writes an edge table definition.
 func (pg *PropertyGraphBuilder) writeEdgeTable(et *EdgeTableBuilder) {
-	pg.Ident(et.tableName)
-	if et.alias != "" {
-		pg.WriteString(" AS ").Ident(et.alias)
-	}
 
-	if et.key != nil {
-		pg.NewLine().Indent(2).WriteString("KEY (")
-		for i, col := range et.key.Columns {
-			if i > 0 {
-				pg.Comma()
-			}
-			pg.Ident(col)
-		}
-		pg.WriteByte(')')
-	}
-
-	if et.sourceKey != nil {
-		pg.NewLine().Indent(2).WriteString("SOURCE KEY (")
-		for i, col := range et.sourceKey.Columns {
-			if i > 0 {
-				pg.Comma()
-			}
-			pg.Ident(col)
-		}
-		pg.WriteString(") REFERENCES ").Ident(et.sourceKey.ReferencedTable)
-		if len(et.sourceKey.ReferencedColumns) > 0 {
-			pg.WriteString(" (")
-			for i, col := range et.sourceKey.ReferencedColumns {
-				if i > 0 {
-					pg.Comma()
-				}
-				pg.Ident(col)
-			}
-			pg.WriteByte(')')
-		}
-		pg.WriteByte(')')
-	}
-
-	if et.destinationKey != nil {
-		pg.NewLine().Indent(2).WriteString("DESTINATION KEY (")
-		for i, col := range et.destinationKey.Columns {
-			if i > 0 {
-				pg.Comma()
-			}
-			pg.Ident(col)
-		}
-		pg.WriteString(") REFERENCES ").Ident(et.destinationKey.ReferencedTable)
-		if len(et.destinationKey.ReferencedColumns) > 0 {
-			pg.WriteString(" (")
-			for i, col := range et.destinationKey.ReferencedColumns {
-				if i > 0 {
-					pg.Comma()
-				}
-				pg.Ident(col)
-			}
-			pg.WriteByte(')')
-		}
-		pg.WriteByte(')')
-	}
-
-	if len(et.labels) > 0 {
-		pg.NewLine().Indent(2).WriteString("LABEL (")
-		for i, label := range et.labels {
-			if i > 0 {
-				pg.Comma()
-			}
-			pg.WriteString(label.Name)
-			if len(label.Properties) > 0 {
-				pg.WriteString(" PROPERTIES (")
-				for j, prop := range label.Properties {
-					if j > 0 {
-						pg.Comma()
-					}
-					pg.Ident(prop)
-				}
-				pg.WriteByte(')')
-			}
-		}
-		pg.WriteByte(')')
-	}
 }
 
 // NodeTable returns a new node table builder.
@@ -316,6 +189,7 @@ func NodeTableFromSQL(table *sql.SelectTable) *NodeTableBuilder {
 
 // NodeTableBuilder builds node table definitions.
 type NodeTableBuilder struct {
+	sql.Builder
 	tableName string
 	alias     string
 	key       *ElementKey
@@ -339,6 +213,35 @@ func (nt *NodeTableBuilder) Label(name string) *LabelBuilder {
 	label := NewLabel(name)
 	nt.labels = append(nt.labels, label)
 	return &LabelBuilder{label: label}
+}
+
+func (nt *NodeTableBuilder) Query() (string, []any) {
+	nt.Ident(nt.tableName)
+	if nt.alias != "" {
+		nt.WriteString(" AS ").Ident(nt.alias)
+	}
+
+	nt.Indent()
+	if nt.key != nil {
+		nt.NewLine().WriteString("KEY ")
+		nt.Wrap(func(b *sql.Builder) {
+			nt.IdentComma(nt.key.Columns...)
+		})
+	}
+
+	for _, label := range nt.labels {
+		nt.NewLine().WriteString("LABEL ")
+		nt.WriteString(label.Name)
+		if len(label.Properties) > 0 {
+			nt.WriteString(" PROPERTIES ")
+			nt.Wrap(func(b *sql.Builder) {
+				nt.IdentComma(label.Properties...)
+			})
+		}
+	}
+	nt.Dedent()
+
+	return nt.String(), nt.GetArgs()
 }
 
 // ToSelectTable converts the node table to a sql.SelectTable.
@@ -398,6 +301,7 @@ func EdgeTableFromSQL(table *sql.SelectTable) *EdgeTableBuilder {
 
 // EdgeTableBuilder builds edge table definitions.
 type EdgeTableBuilder struct {
+	sql.Builder
 	tableName      string
 	alias          string
 	key            *ElementKey
@@ -435,6 +339,64 @@ func (et *EdgeTableBuilder) Label(name string) *LabelBuilder {
 	label := NewLabel(name)
 	et.labels = append(et.labels, label)
 	return &LabelBuilder{label: label}
+}
+
+// Query returns query representation of the edge table.
+func (et *EdgeTableBuilder) Query() (string, []any) {
+	et.Ident(et.tableName)
+	if et.alias != "" {
+		et.WriteString(" AS ").Ident(et.alias)
+	}
+
+	et.Indent()
+	if et.key != nil {
+		et.NewLine().WriteString("KEY ")
+		et.Wrap(func(b *sql.Builder) {
+			et.IdentComma(et.key.Columns...)
+		})
+	}
+	if et.sourceKey != nil {
+		et.NewLine().WriteString("SOURCE KEY ")
+		et.Wrap(func(b *sql.Builder) {
+			et.IdentComma(et.sourceKey.Columns...)
+		})
+		if et.sourceKey.ReferencedTable != "" && len(et.sourceKey.ReferencedColumns) > 0 {
+			et.WriteString(" REFERENCES ")
+			et.Ident(et.sourceKey.ReferencedTable)
+			et.WriteByte(' ')
+			et.Wrap(func(b *sql.Builder) {
+				et.IdentComma(et.sourceKey.ReferencedColumns...)
+			})
+		}
+	}
+	if et.destinationKey != nil {
+		et.NewLine().WriteString("DESTINATION KEY ")
+		et.Wrap(func(b *sql.Builder) {
+			et.IdentComma(et.destinationKey.Columns...)
+		})
+		if et.destinationKey.ReferencedTable != "" && len(et.destinationKey.ReferencedColumns) > 0 {
+			et.WriteString(" REFERENCES ")
+			et.Ident(et.destinationKey.ReferencedTable)
+			et.WriteByte(' ')
+			et.Wrap(func(b *sql.Builder) {
+				et.IdentComma(et.destinationKey.ReferencedColumns...)
+			})
+		}
+	}
+
+	for _, label := range et.labels {
+		et.NewLine().WriteString("LABEL ")
+		et.WriteString(label.Name)
+		if len(label.Properties) > 0 {
+			et.WriteString(" PROPERTIES ")
+			et.Wrap(func(b *sql.Builder) {
+				et.IdentComma(label.Properties...)
+			})
+		}
+	}
+	et.Dedent()
+
+	return et.String(), et.GetArgs()
 }
 
 // ToSelectTable converts the edge table to a sql.SelectTable.

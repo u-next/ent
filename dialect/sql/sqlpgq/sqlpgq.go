@@ -7,19 +7,14 @@ import (
 	"strings"
 
 	"entgo.io/ent/dialect/sql"
+	"entgo.io/ent/dialect/sql/sqlhint"
 )
-
-// Statement is a linear query statement.
-type Statement interface {
-	sql.Querier
-	stmt()
-}
 
 // GraphQuery is a builder for complete GQL queries.
 type GraphQuery struct {
 	sql.Builder
-	graph string      // property graph name
-	stmts []Statement // linear query statements
+	graph string        // property graph name
+	stmts []sql.Querier // linear query statements
 }
 
 // Graph returns a new GraphQuery for the GRAPH statement.
@@ -47,22 +42,27 @@ func (g *GraphQuery) Match(patterns ...Pattern) *GraphQuery {
 }
 
 // MatchWithHint adds a MATCH statement with a hint to the linear query.
-func (g *GraphQuery) MatchWithHint(hint Hint, patterns ...Pattern) *GraphQuery {
-	return g.Append(Match().Hint(hint).Append(patterns...))
+func (g *GraphQuery) MatchWithHint(hint sqlhint.JoinHint, patterns ...Pattern) *GraphQuery {
+	return g.Append(Match(patterns...).Hint(hint))
 }
 
 // OptionalMatch adds an OPTIONAL MATCH statement to the linear query.
 func (g *GraphQuery) OptionalMatch(patterns ...Pattern) *GraphQuery {
-	return g.Append(OptionalMatch().Append(patterns...))
+	return g.Append(OptionalMatch(patterns...))
 }
 
 // OptionalMatchWithHint adds an OPTIONAL MATCH statement with a hint to the linear query.
-func (g *GraphQuery) OptionalMatchWithHint(hint Hint, patterns ...Pattern) *GraphQuery {
-	return g.Append(OptionalMatch().Hint(hint).Append(patterns...))
+func (g *GraphQuery) OptionalMatchWithHint(hint sqlhint.JoinHint, patterns ...Pattern) *GraphQuery {
+	return g.Append(OptionalMatch(patterns...).Hint(hint))
+}
+
+// Where adds a WHERE clause to the last MATCH statement.
+func (g *GraphQuery) Where(p *sql.Predicate) *GraphQuery {
+	return g.Append(Where(p))
 }
 
 // Filter adds a FILTER statement to the linear query.
-func (g *GraphQuery) Filter(p *Predicate) *GraphQuery {
+func (g *GraphQuery) Filter(p *sql.Predicate) *GraphQuery {
 	return g.Append(Filter(p))
 }
 
@@ -170,75 +170,51 @@ func (g *GraphQuery) ExceptDistinct() *GraphQuery {
 // Query returns the GQL query representation.
 func (g *GraphQuery) Query() (string, []any) {
 	if g.graph != "" {
-		g.WriteString("GRAPH ").Ident(g.graph).NewLine()
+		g.WriteString("GRAPH ")
+		g.Ident(g.graph)
 	}
-
-	for i, stmt := range g.stmts {
-		if i > 0 {
-			g.NewLine()
-		}
-		query, args := stmt.Query()
-		g.WriteString(query)
-		g.Args(args...)
+	if len(g.stmts) > 0 {
+		g.NewLine()
+		g.JoinNewLine(g.stmts...)
 	}
 	return g.String(), g.GetArgs()
 }
 
-func (g *GraphQuery) Clone() *GraphQuery {
-	return &GraphQuery{
-		Builder: g.Builder.Clone(),
-		graph:   g.graph,
-		stmts:   g.stmts,
-	}
-}
-
-// Hint represents a Graph query hint.
-type Hint map[string]string
-
-// Query returns the hint representation.
-func (h Hint) Query() (string, []any) {
-	var b sql.Builder
-	b.WriteString("@")
-	b.WrapBraces(func(b *sql.Builder) {
-		i := 0
-		for k, v := range h {
-			if i > 0 {
-				b.Comma()
-			}
-			b.WriteString(fmt.Sprintf("%s=%s", k, v))
-			i++
-		}
-	})
-	return b.String(), b.GetArgs()
+// Statement is a linear query statement.
+type Statement interface {
+	sql.Querier
+	stmt()
 }
 
 // Matcher is a builder for MATCH statements.
 type Matcher struct {
 	sql.Builder
 	optional bool
-	hint     Hint
-	patterns []Pattern
+	hint     sqlhint.JoinHint
+	patterns []sql.Querier
 }
 
 // Match creates a new MATCH statement builder.
 func Match(patterns ...Pattern) *Matcher {
-	return (&Matcher{}).Append(patterns...)
+	return (&Matcher{}).AppendPatterns(patterns...)
 }
 
 // OptionalMatch creates a new OPTIONAL MATCH statement builder.
 func OptionalMatch(patterns ...Pattern) *Matcher {
-	return (&Matcher{optional: true}).Append(patterns...)
+	return (&Matcher{optional: true}).AppendPatterns(patterns...)
 }
 
 // Hint sets the match hint.
-func (m *Matcher) Hint(hint Hint) *Matcher {
+func (m *Matcher) Hint(hint sqlhint.JoinHint) *Matcher {
 	m.hint = hint
 	return m
 }
 
 // Append adds more patterns to the MATCH statement.
-func (m *Matcher) Append(patterns ...Pattern) *Matcher {
-	m.patterns = append(m.patterns, patterns...)
+func (m *Matcher) AppendPatterns(patterns ...Pattern) *Matcher {
+	for _, p := range patterns {
+		m.patterns = append(m.patterns, p)
+	}
 	return m
 }
 
@@ -250,16 +226,11 @@ func (m *Matcher) Query() (string, []any) {
 	m.WriteString("MATCH")
 	if m.hint != nil {
 		m.Pad()
-		m.Join(m.hint)
+		m.hint.Write(&m.Builder)
 	}
-	if m.patterns != nil {
+	if len(m.patterns) > 0 {
 		m.Pad()
-		for i, p := range m.patterns {
-			if i > 0 {
-				m.Comma()
-			}
-			m.Join(p)
-		}
+		m.JoinComma(m.patterns...)
 	}
 	return m.String(), m.GetArgs()
 }
@@ -270,21 +241,21 @@ func (m *Matcher) stmt() {}
 type FilterBuilder struct {
 	sql.Builder
 	where     bool
-	predicate *Predicate
+	predicate *sql.Predicate
 }
 
 // Filter creates a new FILTER statement builder.
-func Filter(pred *Predicate) *FilterBuilder {
+func Filter(pred *sql.Predicate) *FilterBuilder {
 	return &FilterBuilder{predicate: pred}
 }
 
-// FilterWhere creates a new FILTER statement builder with WHERE.
-func FilterWhere(pred *Predicate) *FilterBuilder {
-	return &FilterBuilder{where: true, predicate: pred}
+func (f *FilterBuilder) Where() *FilterBuilder {
+	f.where = true
+	return f
 }
 
 // Predicate sets the boolean predicate expression to filter by.
-func (f *FilterBuilder) Predicate(pred *Predicate) *FilterBuilder {
+func (f *FilterBuilder) Predicate(pred *sql.Predicate) *FilterBuilder {
 	f.predicate = pred
 	return f
 }
@@ -304,6 +275,7 @@ func (f *FilterBuilder) Query() (string, []any) {
 
 func (f *FilterBuilder) stmt() {}
 
+// FIXME: refactor order by clauses
 // columnExpr represents a single column expression.
 type columnExpr struct {
 	sql.Builder
@@ -440,39 +412,35 @@ func (r *ReturnBuilder) Offset(count int64) *ReturnBuilder {
 // Query returns the RETURN statement representation.
 func (r *ReturnBuilder) Query() (string, []any) {
 	r.WriteString("RETURN")
-
 	if r.all {
 		r.WriteString(" ALL")
 	} else if r.distinct {
 		r.WriteString(" DISTINCT")
 	}
-
-	r.Pad()
-	r.JoinComma(r.items...)
+	if len(r.items) > 0 {
+		r.Pad()
+		r.JoinComma(r.items...)
+	}
 	if len(r.groupBy) > 0 {
 		r.NewLine()
 		r.WriteString("GROUP BY ")
 		r.JoinComma(r.groupBy...)
 	}
-
 	if len(r.orderBy) > 0 {
 		r.NewLine()
 		r.WriteString("ORDER BY ")
 		r.JoinComma(r.orderBy...)
 	}
-
 	if r.limit != 0 {
 		r.NewLine()
 		r.WriteString("LIMIT ")
 		r.WriteString(strconv.FormatInt(r.limit, 10))
 	}
-
 	if r.offset != 0 {
 		r.NewLine()
 		r.WriteString("OFFSET ")
 		r.WriteString(strconv.FormatInt(r.offset, 10))
 	}
-
 	return r.String(), r.GetArgs()
 }
 
@@ -480,6 +448,7 @@ func (r *ReturnBuilder) stmt() {}
 
 // assignment represents a variable assignment in a LET statement.
 type assignment struct {
+	sql.Builder
 	variable string
 	value    sql.Querier
 }
@@ -509,16 +478,23 @@ func (a *assignment) F(fields ...string) string {
 	var b sql.Builder
 	b.Ident(a.variable)
 	for _, f := range fields {
-		b.WriteString(".")
+		b.WriteByte('.')
 		b.Ident(f)
 	}
 	return b.String()
 }
 
+func (a *assignment) Query() (string, []any) {
+	a.Ident(a.variable)
+	a.WriteString(" = ")
+	a.Join(a.value)
+	return a.String(), a.GetArgs()
+}
+
 // LetBuilder is a builder for LET statements.
 type LetBuilder struct {
 	sql.Builder
-	assignments []*assignment
+	assignments []sql.Querier
 }
 
 // Let creates a new LET statement builder.
@@ -528,20 +504,18 @@ func Let() *LetBuilder {
 
 // Append adds more assignments to the LET statement.
 func (l *LetBuilder) Append(as ...*assignment) *LetBuilder {
-	l.assignments = append(l.assignments, as...)
+	for _, a := range as {
+		l.assignments = append(l.assignments, a)
+	}
 	return l
 }
 
 // Query returns the LET statement representation.
 func (l *LetBuilder) Query() (string, []any) {
-	l.WriteString("LET ")
-	for i, assign := range l.assignments {
-		if i > 0 {
-			l.Comma()
-		}
-		l.Ident(assign.variable)
-		l.WriteString(" = ")
-		l.Join(assign.value)
+	l.WriteString("LET")
+	if len(l.assignments) > 0 {
+		l.Pad()
+		l.JoinComma(l.assignments...)
 	}
 	return l.String(), l.GetArgs()
 }
@@ -569,8 +543,11 @@ func (g *GroupByBuilder) Append(items ...*columnExpr) *GroupByBuilder {
 
 // Query returns the GROUP BY statement representation.
 func (g *GroupByBuilder) Query() (string, []any) {
-	g.WriteString("GROUP BY ")
-	g.JoinComma(g.exprs...)
+	g.WriteString("GROUP BY")
+	if len(g.exprs) > 0 {
+		g.Pad()
+		g.JoinComma(g.exprs...)
+	}
 	return g.String(), g.GetArgs()
 }
 
@@ -597,8 +574,11 @@ func (o *OrderByBuilder) Append(orders ...*columnExpr) *OrderByBuilder {
 
 // Query returns the ORDER BY statement representation.
 func (o *OrderByBuilder) Query() (string, []any) {
-	o.WriteString("ORDER BY ")
-	o.JoinComma(o.orders...)
+	o.WriteString("ORDER BY")
+	if len(o.orders) > 0 {
+		o.Pad()
+		o.JoinComma(o.orders...)
+	}
 	return o.String(), o.GetArgs()
 }
 
@@ -705,15 +685,19 @@ func (f *ForBuilder) WithOffsetAs(name string) *ForBuilder {
 
 // Query returns the FOR statement representation.
 func (f *ForBuilder) Query() (string, []any) {
-	f.WriteString("FOR ")
-	f.Ident(f.element)
-	f.WriteString(" IN ")
+	f.WriteString("FOR")
+	if f.element != "" {
+		f.Pad()
+		f.Ident(f.element)
+	}
+	f.WriteString(" IN")
 	if f.array != nil {
+		f.Pad()
 		f.Join(f.array)
 	}
 	if f.offset != "" {
 		f.WriteString(" WITH OFFSET")
-		if f.offset != "offset" {
+		if f.offset != "" && f.offset != "offset" {
 			f.WriteString(" AS ")
 			f.Ident(f.offset)
 		}
@@ -797,22 +781,20 @@ func (w *WithBuilder) GroupBy(exprs ...sql.Querier) *WithBuilder {
 // Query returns the WITH statement representation.
 func (w *WithBuilder) Query() (string, []any) {
 	w.WriteString("WITH")
-
 	if w.all {
 		w.WriteString(" ALL")
 	} else if w.distinct {
 		w.WriteString(" DISTINCT")
 	}
-
-	w.Pad()
-	w.JoinComma(w.items...)
-
+	if len(w.items) > 0 {
+		w.Pad()
+		w.JoinComma(w.items...)
+	}
 	if len(w.groupBy) > 0 {
 		w.NewLine()
 		w.WriteString("GROUP BY ")
 		w.JoinComma(w.groupBy...)
 	}
-
 	return w.String(), w.GetArgs()
 }
 
@@ -851,37 +833,37 @@ func (s SetOperation) stmt() {}
 
 func UnionAll() SetOperation {
 	return func(b *sql.Builder) {
-		// b.WriteOp(SetUnionAll)
+		b.WriteString("UNION ALL")
 	}
 }
 
 func UnionDistinct() SetOperation {
 	return func(b *sql.Builder) {
-		// b.WriteOp(SetUnionDistinct)
+		b.WriteString("UNION DISTINCT")
 	}
 }
 
 func IntersectAll() SetOperation {
 	return func(b *sql.Builder) {
-		// b.WriteOp(SetIntersectAll)
+		b.WriteString("INTERSECT ALL")
 	}
 }
 
 func IntersectDistinct() SetOperation {
 	return func(b *sql.Builder) {
-		// b.WriteOp(SetIntersectDistinct)
+		b.WriteString("INTERSECT DISTINCT")
 	}
 }
 
 func ExceptAll() SetOperation {
 	return func(b *sql.Builder) {
-		// b.WriteOp(SetExceptAll)
+		b.WriteString("EXCEPT ALL")
 	}
 }
 
 func ExceptDistinct() SetOperation {
 	return func(b *sql.Builder) {
-		// b.WriteOp(SetExceptDistinct)
+		b.WriteString("EXCEPT DISTINCT")
 	}
 }
 
@@ -924,29 +906,27 @@ func (g *GraphTableWrapper) As(alias string) *GraphTableWrapper {
 
 // Query returns the GRAPH_TABLE operator representation.
 func (g *GraphTableWrapper) Query() (string, []any) {
-	g.WriteString("GRAPH_TABLE ").Wrap(func(b *sql.Builder) {
+	b := g.Clone()
+	b.WriteString("GRAPH_TABLE ")
+	b.Wrap(func(b *sql.Builder) {
 		if g.graph != "" {
-			b.NewLine()
-			b.Indent(1).Ident(g.graph)
-			b.NewLine()
+			b.Indent().NewLine()
+			b.Ident(g.graph)
 		}
 
-		for i, stmt := range g.stmts {
-			query, args := stmt.Query()
-			b.Indent(1).WriteString(query)
-			b.Args(args...)
-			if i >= 0 {
-				b.NewLine()
-			}
+		if len(g.stmts) > 0 {
+			b.NewLine()
+			b.JoinNewLine(g.stmts...)
+			b.Dedent().NewLine()
 		}
 	})
 
 	if g.alias != "" {
-		g.WriteString(" AS ")
-		g.Ident(g.alias)
+		b.WriteString(" AS ")
+		b.Ident(g.alias)
 	}
 
-	return g.String(), g.GetArgs()
+	return b.String(), b.GetArgs()
 }
 
 func (g *GraphTableWrapper) C(column string) string {
@@ -1056,51 +1036,32 @@ func isAlias(s string) bool {
 	return strings.Contains(s, " AS ") || strings.Contains(s, " as ")
 }
 
+type WhereBuilder struct {
+	sql.Builder
+	predicate *sql.Predicate
+}
+
+// Where creates a new WHERE clause builder.
+func Where(pred *sql.Predicate) *WhereBuilder {
+	return &WhereBuilder{predicate: pred}
+}
+
+func (w *WhereBuilder) Query() (string, []any) {
+	w.WriteString("WHERE")
+	if w.predicate != nil {
+		w.Pad()
+		w.Join(w.predicate)
+	}
+	return w.String(), w.GetArgs()
+}
+
+func (w *WhereBuilder) stmt() {}
+
 // Pattern is an interface for graph patterns.
 type Pattern interface {
 	sql.Querier
 	pattern()
 }
-
-// GraphPattern is a builder for graph patterns.
-type GraphPattern struct {
-	sql.Builder
-	pathPatterns []sql.Querier
-	where        *Predicate
-}
-
-// NewGraphPattern creates a new graph pattern builder.
-func NewGraphPattern() *GraphPattern {
-	return &GraphPattern{}
-}
-
-// Append adds a path pattern to the graph pattern.
-func (g *GraphPattern) Append(pattern *PathPattern) *GraphPattern {
-	g.pathPatterns = append(g.pathPatterns, pattern)
-	return g
-}
-
-// Where adds a WHERE clause to the graph pattern.
-func (g *GraphPattern) Where(condition *Predicate) *GraphPattern {
-	g.where = condition
-	return g
-}
-
-// Query returns the graph pattern representation.
-func (g *GraphPattern) Query() (string, []any) {
-	if len(g.pathPatterns) > 0 {
-		g.JoinComma(g.pathPatterns...)
-	}
-
-	if g.where != nil {
-		g.WriteString(" WHERE ")
-		g.Join(g.where)
-	}
-
-	return g.String(), g.GetArgs()
-}
-
-func (g *GraphPattern) pattern() {}
 
 // PathPattern is a builder for path patterns.
 type PathPattern struct {
@@ -1108,13 +1069,28 @@ type PathPattern struct {
 	variable     string
 	searchPrefix PathSearchPrefix
 	pathMode     PathMode
-	elements     []Pattern
-	quantifier   *QuantifierBuilder
+	elements     []sql.Querier
+	bound        [2]*int
 }
 
 // Path creates a new path pattern builder.
-func Path() *PathPattern {
-	return &PathPattern{}
+func Path(path *PathPattern) *PathPattern {
+	return (&PathPattern{}).Path(path)
+}
+
+// From creates a new path pattern builder with a starting node.
+func From(node *NodePattern) *PathPattern {
+	return (&PathPattern{}).From(node)
+}
+
+// To creates a new path pattern builder with an ending node.
+func To(node *NodePattern) *PathPattern {
+	return (&PathPattern{}).To(node)
+}
+
+// Via creates a new path pattern builder with an edge.
+func Via(edge *EdgePattern) *PathPattern {
+	return (&PathPattern{}).Via(edge)
 }
 
 // From adds a starting node to the path pattern.
@@ -1195,27 +1171,17 @@ func (p *PathPattern) Trail() *PathPattern {
 	return p
 }
 
-// Quantifier sets the quantifier for the path pattern.
-func (p *PathPattern) Quantifier(quantifier *QuantifierBuilder) *PathPattern {
-	p.quantifier = quantifier
-	return p
-}
-
-// Fixed sets a fixed quantifier {n} for the path pattern.
+// Fixed sets the path quantifier to fixed with the given bound.
 func (p *PathPattern) Fixed(bound int) *PathPattern {
-	p.quantifier = NewFixedQuantifier(bound)
+	p.bound[0] = &bound
+	p.bound[1] = nil
 	return p
 }
 
-// Bounded sets a bounded quantifier {min,max} for the path pattern.
-func (p *PathPattern) Bounded(lowerBound, upperBound int) *PathPattern {
-	p.quantifier = NewBoundedQuantifier(lowerBound, upperBound)
-	return p
-}
-
-// OpenBounded sets an open bounded quantifier {,max} for the path pattern.
-func (p *PathPattern) OpenBounded(upperBound int) *PathPattern {
-	p.quantifier = NewOpenBoundedQuantifier(upperBound)
+// Bounded sets the path quantifier to bounded with the given lower and upper bounds.
+func (p *PathPattern) Bounded(lower, upper *int) *PathPattern {
+	p.bound[0] = lower
+	p.bound[1] = upper
 	return p
 }
 
@@ -1231,39 +1197,37 @@ func (p *PathPattern) C(column string) string {
 
 // Query returns the path pattern representation.
 func (p *PathPattern) Query() (string, []any) {
+	b := p.Clone()
+	quantified := p.bound[0] != nil || p.bound[1] != nil
+	if quantified {
+		b.WriteByte('(')
+	}
 	if p.variable != "" {
-		p.WriteString(p.variable)
-		p.WriteString(" = ")
+		b.WriteString(p.variable)
+		b.WriteString(" = ")
 	}
-
-	// Path search prefix (cannot be combined with path mode)
 	if p.searchPrefix != PrefixAll {
-		p.WriteString(pathSearchPrefixes[p.searchPrefix]).Pad()
+		b.WriteString(pathSearchPrefixes[p.searchPrefix]).Pad()
 	}
-
-	// Path mode (cannot be combined with path search prefix other than ALL)
 	if p.pathMode != ModeWalk && p.searchPrefix == PrefixAll {
-		p.WriteString(pathModes[p.pathMode]).Pad()
+		b.WriteString(pathModes[p.pathMode]).Pad()
 	}
-
-	for _, element := range p.elements {
-		switch element.(type) {
-		case *PathPattern:
-			p.Wrap(func(b *sql.Builder) {
-				b.Join(element)
-			})
-		default:
-			p.Join(element)
-		}
+	b.Join(p.elements...)
+	if quantified {
+		b.WriteByte(')')
 	}
-
-	if p.quantifier != nil {
-		quantQuery, quantArgs := p.quantifier.Query()
-		p.WriteString(quantQuery)
-		p.Args(quantArgs...)
+	if quantified {
+		b.WrapBraces(func(b *sql.Builder) {
+			if p.bound[0] != nil {
+				b.WriteString(strconv.Itoa(*p.bound[0]))
+			}
+			if p.bound[1] != nil {
+				b.Comma()
+				b.WriteString(strconv.Itoa(*p.bound[1]))
+			}
+		})
 	}
-
-	return p.String(), p.GetArgs()
+	return b.String(), b.GetArgs()
 }
 
 func (p *PathPattern) pattern() {}
@@ -1271,22 +1235,19 @@ func (p *PathPattern) pattern() {}
 // NodePattern is a builder for node patterns.
 type NodePattern struct {
 	sql.Builder
-	variable   string
-	labelExpr  *LabelExpr
-	properties map[string]sql.Querier
-	where      *Predicate
+	filler *patternFiller
 }
 
 // N creates a new node pattern builder.
 func N() *NodePattern {
 	return &NodePattern{
-		properties: make(map[string]sql.Querier),
+		filler: &patternFiller{properties: make(map[string]sql.Querier)},
 	}
 }
 
 // Named sets the node variable.
 func (n *NodePattern) Named(name string) *NodePattern {
-	n.variable = name
+	n.filler.variable = name
 	return n
 }
 
@@ -1296,39 +1257,39 @@ func (n *NodePattern) Labels(labels ...string) *NodePattern {
 	for i, l := range labels {
 		ls[i] = L(l)
 	}
-	n.labelExpr = OrL(ls...)
+	n.filler.labelExpr = OrL(ls...)
 	return n
 }
 
 // LabelExpression sets a complex label expression.
 func (n *NodePattern) LabelExpr(expr *LabelExpr) *NodePattern {
-	n.labelExpr = expr
+	n.filler.labelExpr = expr
 	return n
 }
 
 // Property adds a property filter.
 func (n *NodePattern) Property(key string, expr sql.Querier) *NodePattern {
-	n.properties[key] = expr
+	n.filler.properties[key] = expr
 	return n
 }
 
 // Properties adds multiple property filters.
 func (n *NodePattern) Properties(props map[string]sql.Querier) *NodePattern {
-	maps.Copy(n.properties, props)
+	maps.Copy(n.filler.properties, props)
 	return n
 }
 
 // Where adds a WHERE condition.
-func (n *NodePattern) Where(condition *Predicate) *NodePattern {
-	n.where = condition
+func (n *NodePattern) Where(condition *sql.Predicate) *NodePattern {
+	n.filler.where = condition
 	return n
 }
 
 // F returns a formatted string for the field of the node variable.
 func (n *NodePattern) F(fields ...string) string {
 	var b sql.Builder
-	if n.variable != "" {
-		b.Ident(n.variable)
+	if n.filler.variable != "" {
+		b.Ident(n.filler.variable)
 	}
 	for _, field := range fields {
 		b.WriteByte('.').Ident(field)
@@ -1338,48 +1299,16 @@ func (n *NodePattern) F(fields ...string) string {
 
 // L returns a label expression for the node pattern.
 func (n *NodePattern) L() *LabelExpr {
-	return n.labelExpr
+	return n.filler.labelExpr
 }
 
 // Query returns the node pattern representation.
 func (n *NodePattern) Query() (string, []any) {
-	if n.Len() > 0 || len(n.GetArgs()) > 0 {
-		n.Reset()
-		n.ClearArgs()
-	}
-
-	n.WriteByte('(')
-
-	if n.variable != "" {
-		n.Ident(n.variable)
-	}
-
-	if n.labelExpr != nil {
-		n.WriteByte(':')
-		n.Join(n.labelExpr)
-	}
-
-	if len(n.properties) > 0 {
-		n.WriteString(" {")
-		first := true
-		for key, value := range n.properties {
-			if !first {
-				n.WriteString(", ")
-			}
-			n.WriteString(key).WriteString(": ")
-			n.Join(value)
-			first = false
-		}
-		n.WriteByte('}')
-	}
-
-	if n.where != nil {
-		n.WriteString(" WHERE ")
-		n.Join(n.where)
-	}
-
-	n.WriteByte(')')
-	return n.String(), n.GetArgs()
+	b := n.Clone()
+	b.Wrap(func(b *sql.Builder) {
+		b.Join(n.filler)
+	})
+	return b.String(), b.GetArgs()
 }
 
 func (n *NodePattern) pattern() {}
@@ -1396,20 +1325,16 @@ const (
 // EdgePattern is a builder for edge patterns.
 type EdgePattern struct {
 	sql.Builder
+	filler      *patternFiller
 	direction   EdgeDirection
-	variable    string
-	labelExpr   *LabelExpr
-	properties  map[string]any
-	where       sql.Querier
-	quantifier  sql.Querier
 	abbreviated bool
 }
 
 // E creates a new edge pattern builder.
 func E() *EdgePattern {
 	return &EdgePattern{
-		direction:  EdgeAnyDirection,
-		properties: make(map[string]any),
+		direction: EdgeAnyDirection,
+		filler:    &patternFiller{properties: make(map[string]sql.Querier)},
 	}
 }
 
@@ -1433,7 +1358,7 @@ func (e *EdgePattern) AnyDirection() *EdgePattern {
 
 // Named sets the edge variable.
 func (e *EdgePattern) Named(name string) *EdgePattern {
-	e.variable = name
+	e.filler.variable = name
 	return e
 }
 
@@ -1443,37 +1368,31 @@ func (e *EdgePattern) Labels(labels ...string) *EdgePattern {
 	for i, l := range labels {
 		ls[i] = L(l)
 	}
-	e.labelExpr = OrL(ls...)
+	e.filler.labelExpr = OrL(ls...)
 	return e
 }
 
 // LabelExpr sets a complex label expression.
 func (e *EdgePattern) LabelExpr(expr *LabelExpr) *EdgePattern {
-	e.labelExpr = expr
+	e.filler.labelExpr = expr
 	return e
 }
 
 // Property adds a property filter.
-func (e *EdgePattern) Property(key string, value any) *EdgePattern {
-	e.properties[key] = value
+func (e *EdgePattern) Property(key string, value sql.Querier) *EdgePattern {
+	e.filler.properties[key] = value
 	return e
 }
 
 // Properties adds multiple property filters.
-func (e *EdgePattern) Properties(props map[string]any) *EdgePattern {
-	maps.Copy(e.properties, props)
+func (e *EdgePattern) Properties(props map[string]sql.Querier) *EdgePattern {
+	maps.Copy(e.filler.properties, props)
 	return e
 }
 
 // Where adds a WHERE condition.
 func (e *EdgePattern) Where(condition sql.Querier) *EdgePattern {
-	e.where = condition
-	return e
-}
-
-// Quantifier sets the path quantifier.
-func (e *EdgePattern) Quantifier(quantifier sql.Querier) *EdgePattern {
-	e.quantifier = quantifier
+	e.filler.where = condition
 	return e
 }
 
@@ -1486,8 +1405,8 @@ func (e *EdgePattern) Abbreviated() *EdgePattern {
 // F returns a formatted string for the field of the edge variable.
 func (e *EdgePattern) F(fields ...string) string {
 	var b sql.Builder
-	if e.variable != "" {
-		b.Ident(e.variable)
+	if e.filler.variable != "" {
+		b.Ident(e.filler.variable)
 	}
 	for _, field := range fields {
 		b.WriteByte('.').Ident(field)
@@ -1497,190 +1416,63 @@ func (e *EdgePattern) F(fields ...string) string {
 
 // Query returns the edge pattern representation.
 func (e *EdgePattern) Query() (string, []any) {
-	if e.Len() > 0 || len(e.GetArgs()) > 0 {
-		e.Reset()
-		e.ClearArgs()
-	}
-
-	// Left arrow for left direction
+	b := e.Clone()
 	if e.direction == EdgeLeft {
-		e.WriteByte('<')
+		b.WriteByte('<')
 	}
-
-	// Edge bracket start
-	e.WriteByte('-')
-
 	if !e.abbreviated {
-		e.WriteByte('[')
-
-		if e.variable != "" {
-			e.Ident(e.variable)
-		}
-
-		if e.labelExpr != nil {
-			e.WriteByte(':')
-			e.Join(e.labelExpr)
-		}
-
-		if len(e.properties) > 0 {
-			e.WriteString(" {")
-			first := true
-			for key, value := range e.properties {
-				if !first {
-					e.WriteString(", ")
-				}
-				e.WriteString(key).WriteString(": ")
-				e.Arg(value)
-				first = false
-			}
-			e.WriteByte('}')
-		}
-
-		if e.where != nil {
-			e.WriteString(" WHERE ")
-			e.Join(e.where)
-		}
-
-		e.WriteByte(']')
+		b.WriteString("-[")
+		b.Join(e.filler)
+		b.WriteString("]-")
+	} else {
+		b.WriteByte('-')
 	}
-
-	if e.quantifier != nil {
-		e.Join(e.quantifier)
-	}
-
-	e.WriteByte('-')
-
-	// Right arrow for right direction
 	if e.direction == EdgeRight {
-		e.WriteByte('>')
+		b.WriteByte('>')
 	}
-
-	return e.String(), e.GetArgs()
+	return b.String(), b.GetArgs()
 }
 
 func (e *EdgePattern) pattern() {}
 
-// QuantifierType represents different quantifier types.
-type QuantifierType int
-
-const (
-	QuantifierFixed QuantifierType = iota
-	QuantifierBounded
-)
-
-// QuantifierBuilder is a builder for path quantifiers.
-type QuantifierBuilder struct {
+type patternFiller struct {
 	sql.Builder
-	quantifierType QuantifierType
-	bound          int
-	lowerBound     int
-	upperBound     int
+	variable   string
+	labelExpr  *LabelExpr
+	properties map[string]sql.Querier
+	where      sql.Querier
 }
 
-// NewFixedQuantifier creates a fixed quantifier {n}.
-func NewFixedQuantifier(bound int) *QuantifierBuilder {
-	return &QuantifierBuilder{
-		quantifierType: QuantifierFixed,
-		bound:          bound,
+func (p *patternFiller) Query() (string, []any) {
+	b := p.Clone()
+	if p.variable != "" {
+		b.Ident(p.variable)
 	}
-}
-
-// NewBoundedQuantifier creates a bounded quantifier {min,max}.
-func NewBoundedQuantifier(lowerBound, upperBound int) *QuantifierBuilder {
-	return &QuantifierBuilder{
-		quantifierType: QuantifierBounded,
-		lowerBound:     lowerBound,
-		upperBound:     upperBound,
+	if p.labelExpr != nil {
+		b.WriteByte(':')
+		b.Join(p.labelExpr)
 	}
-}
-
-// NewOpenBoundedQuantifier creates an open bounded quantifier {,max} (lower bound defaults to 0).
-func NewOpenBoundedQuantifier(upperBound int) *QuantifierBuilder {
-	return &QuantifierBuilder{
-		quantifierType: QuantifierBounded,
-		lowerBound:     0,
-		upperBound:     upperBound,
-	}
-}
-
-// Query returns the quantifier representation.
-func (q *QuantifierBuilder) Query() (string, []any) {
-	q.WrapBraces(func(b *sql.Builder) {
-		switch q.quantifierType {
-		case QuantifierFixed:
-			b.WriteString(strconv.Itoa(q.bound))
-		case QuantifierBounded:
-			if q.lowerBound > 0 {
-				b.WriteString(strconv.Itoa(q.lowerBound))
+	if len(p.properties) > 0 {
+		b.Pad()
+		b.WrapBraces(func(b *sql.Builder) {
+			first := true
+			for key, value := range p.properties {
+				if !first {
+					b.Comma()
+				}
+				b.WriteString(key)
+				b.WriteString(": ")
+				b.Join(value)
+				first = false
 			}
-			b.Comma()
-			if q.upperBound > 0 {
-				b.WriteString(strconv.Itoa(q.upperBound))
-			}
-		}
-	})
-
-	return q.String(), q.GetArgs()
-}
-
-// QuantifiedPatternBuilder is a builder for quantified path patterns.
-type QuantifiedPatternBuilder struct {
-	sql.Builder
-	ptn        sql.Querier
-	quantifier *QuantifierBuilder
-}
-
-// Quantified creates a new quantified pattern builder.
-func Quantified() *QuantifiedPatternBuilder {
-	return &QuantifiedPatternBuilder{}
-}
-
-// Pattern sets the pattern to be quantified.
-func (q *QuantifiedPatternBuilder) Pattern(pattern sql.Querier) *QuantifiedPatternBuilder {
-	q.ptn = pattern
-	return q
-}
-
-// Quantifier sets the quantifier for the pattern.
-func (q *QuantifiedPatternBuilder) Quantifier(quantifier *QuantifierBuilder) *QuantifiedPatternBuilder {
-	q.quantifier = quantifier
-	return q
-}
-
-// Fixed sets a fixed quantifier {n}.
-func (q *QuantifiedPatternBuilder) Fixed(bound int) *QuantifiedPatternBuilder {
-	q.quantifier = NewFixedQuantifier(bound)
-	return q
-}
-
-// Bounded sets a bounded quantifier {min,max}.
-func (q *QuantifiedPatternBuilder) Bounded(lowerBound, upperBound int) *QuantifiedPatternBuilder {
-	q.quantifier = NewBoundedQuantifier(lowerBound, upperBound)
-	return q
-}
-
-// OpenBounded sets an open bounded quantifier {,max}.
-func (q *QuantifiedPatternBuilder) OpenBounded(upperBound int) *QuantifiedPatternBuilder {
-	q.quantifier = NewOpenBoundedQuantifier(upperBound)
-	return q
-}
-
-// Query returns the quantified pattern representation.
-func (q *QuantifiedPatternBuilder) Query() (string, []any) {
-	if q.ptn != nil {
-		q.Join(q.ptn)
+		})
 	}
-
-	if q.quantifier != nil {
-		quantQuery, quantArgs := q.quantifier.Query()
-		q.WriteString(quantQuery)
-		q.Args(quantArgs...)
+	if p.where != nil {
+		b.WriteString(" WHERE ")
+		b.Join(p.where)
 	}
-
-	return q.String(), q.GetArgs()
+	return b.String(), b.GetArgs()
 }
-
-func (q *QuantifiedPatternBuilder) pattern() {}
 
 // LabelExpr is a builder for complex label expressions.
 type LabelExpr struct {

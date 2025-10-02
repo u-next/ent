@@ -126,7 +126,7 @@ func (v *ViewBuilder) Query() (string, []any) {
 	if v.exists {
 		v.WriteString("IF NOT EXISTS ")
 	}
-	v.writeSchema(v.schema)
+	v.WriteSchema(v.schema)
 	v.Ident(v.name)
 	if len(v.columns) > 0 {
 		v.Pad().Wrap(func(b *Builder) { b.JoinComma(v.columns...) })
@@ -443,7 +443,7 @@ func (i *InsertBuilder) Query() (string, []any) {
 func (i *InsertBuilder) QueryErr() (string, []any, error) {
 	b := i.Builder.Clone()
 	b.WriteString("INSERT INTO ")
-	b.writeSchema(i.schema)
+	b.WriteSchema(i.schema)
 	b.Ident(i.table).Pad()
 	if i.defaults && len(i.columns) == 0 {
 		i.writeDefault(&b)
@@ -646,7 +646,7 @@ func (u *UpdateBuilder) Query() (string, []any) {
 		b.Pad()
 	}
 	b.WriteString("UPDATE ")
-	b.writeSchema(u.schema)
+	b.WriteSchema(u.schema)
 	b.Ident(u.table).WriteString(" SET ")
 	u.writeSetter(&b)
 	if u.where != nil {
@@ -738,7 +738,7 @@ func (d *DeleteBuilder) FromSelect(s *Selector) *DeleteBuilder {
 // Query returns query representation of a `DELETE` statement.
 func (d *DeleteBuilder) Query() (string, []any) {
 	d.WriteString("DELETE FROM ")
-	d.writeSchema(d.schema)
+	d.WriteSchema(d.schema)
 	d.Ident(d.table)
 	if d.where != nil {
 		d.WriteString(" WHERE ")
@@ -1641,7 +1641,7 @@ func (s *SelectTable) C(column string) string {
 	}
 	b := &Builder{dialect: s.dialect}
 	if s.as == "" {
-		b.writeSchema(s.schema)
+		b.WriteSchema(s.schema)
 	}
 	b.Ident(name).WriteByte('.').Ident(column)
 	return b.String()
@@ -1670,7 +1670,7 @@ func (s *SelectTable) ref() string {
 		return s.name
 	}
 	b := &Builder{dialect: s.dialect}
-	b.writeSchema(s.schema)
+	b.WriteSchema(s.schema)
 	b.Ident(s.name)
 	if s.as != "" {
 		b.WriteString(" AS ")
@@ -3036,6 +3036,7 @@ type Builder struct {
 	total     int              // total number of parameters in query tree.
 	errs      []error          // errors that added during the query construction.
 	qualifier string           // qualifier to prefix identifiers (e.g. table name).
+	depth     int              // indentation depth.
 }
 
 // Quote quotes the given identifier with the characters based
@@ -3088,16 +3089,25 @@ func (b *Builder) IdentComma(s ...string) *Builder {
 }
 
 // Indent adds indentation to the builder.
-func (b *Builder) Indent(depth int) *Builder {
-	for range depth {
-		b.WriteString("    ")
+func (b *Builder) Indent() *Builder {
+	b.depth++
+	return b
+}
+
+// Dedent removes indentation from the builder.
+func (b *Builder) Dedent() *Builder {
+	if b.depth > 0 {
+		b.depth--
 	}
 	return b
 }
 
-// NewLine adds a new line to the builder.
+// NewLine adds a new line to the builder with the current indentation.
 func (b *Builder) NewLine() *Builder {
 	b.WriteByte('\n')
+	for i := 0; i < b.depth; i++ {
+		b.WriteString("  ")
+	}
 	return b
 }
 
@@ -3157,7 +3167,7 @@ func (b *Builder) AddError(err error) *Builder {
 	return b
 }
 
-func (b *Builder) writeSchema(schema string) {
+func (b *Builder) WriteSchema(schema string) {
 	if schema != "" && b.dialect != dialect.SQLite {
 		b.Ident(schema).WriteByte('.')
 	}
@@ -3340,9 +3350,44 @@ func (b *Builder) Join(qs ...Querier) *Builder {
 	return b.join(qs, "")
 }
 
+// JoinSpace joins a list of Queries and adds space between them.
+func (b *Builder) JoinSpace(qs ...Querier) *Builder {
+	return b.join(qs, " ")
+}
+
 // JoinComma joins a list of Queries and adds comma between them.
 func (b *Builder) JoinComma(qs ...Querier) *Builder {
 	return b.join(qs, ", ")
+}
+
+// JoinNewLine joins a list of Queries and adds new line between them.
+func (b *Builder) JoinNewLine(qs ...Querier) *Builder {
+	return b.Joinf(qs, func(b *Builder) { b.NewLine() })
+}
+
+// Joinf joins a list of Queries to the builder with a given separator.
+func (b *Builder) Joinf(qs []Querier, f func(*Builder)) *Builder {
+	for i, q := range qs {
+		if i > 0 {
+			f(b)
+		}
+		st, ok := q.(state)
+		if ok {
+			st.SetDialect(b.dialect)
+			st.SetTotal(b.total)
+			st.SetDepth(b.depth)
+		}
+		query, args := q.Query()
+		b.WriteString(query)
+		b.args = append(b.args, args...)
+		b.total += len(args)
+		if qe, ok := q.(querierErr); ok {
+			if err := qe.Err(); err != nil {
+				b.AddError(err)
+			}
+		}
+	}
+	return b
 }
 
 // join a list of Queries to the builder with a given separator.
@@ -3355,6 +3400,7 @@ func (b *Builder) join(qs []Querier, sep string) *Builder {
 		if ok {
 			st.SetDialect(b.dialect)
 			st.SetTotal(b.total)
+			st.SetDepth(b.depth)
 		}
 		query, args := q.Query()
 		b.WriteString(query)
@@ -3421,6 +3467,16 @@ func (b *Builder) SetTotal(total int) {
 	b.total = total
 }
 
+// Depth returns the current indentation depth.
+func (b Builder) Depth() int {
+	return b.depth
+}
+
+// SetDepth sets the current indentation depth.
+func (b *Builder) SetDepth(depth int) {
+	b.depth = depth
+}
+
 // Query implements the Querier interface.
 func (b Builder) Query() (string, []any) {
 	return b.String(), b.args
@@ -3428,7 +3484,7 @@ func (b Builder) Query() (string, []any) {
 
 // Clone returns a shallow Clone of a builder.
 func (b Builder) Clone() Builder {
-	c := Builder{dialect: b.dialect, total: b.total, sb: &strings.Builder{}}
+	c := Builder{dialect: b.dialect, total: b.total, depth: b.depth, sb: &strings.Builder{}}
 	if len(b.args) > 0 {
 		c.args = append(c.args, b.args...)
 	}
@@ -3503,6 +3559,8 @@ type state interface {
 	SetDialect(string)
 	Total() int
 	SetTotal(int)
+	Depth() int
+	SetDepth(int)
 }
 
 // DialectBuilder prefixes all root builders with the `Dialect` constructor.

@@ -1052,10 +1052,7 @@ func DDL(ctx context.Context, args DDLArgs) (string, error) {
 
 // PropertyGraphFromSchema creates a PropertyGraphBuilder from a schema.PropertyGraph.
 func PropertyGraphFromSchema(pg *PropertyGraph) *sqlpgq.PropertyGraphBuilder {
-	builder := sqlpgq.CreatePropertyGraph(pg.Name).
-		Schema(pg.Schema).
-		Comment(pg.Comment).
-		Options(pg.Options...)
+	builder := sqlpgq.CreatePropertyGraph(pg.Name).SetSchema(pg.Schema)
 
 	for _, nt := range pg.NodeTables {
 		nodeBuilder := sqlpgq.NodeTable(nt.TableName)

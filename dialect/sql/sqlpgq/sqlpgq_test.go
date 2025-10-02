@@ -1,11 +1,11 @@
 package sqlpgq
 
 import (
-	"log"
 	"strconv"
 	"testing"
 
 	"entgo.io/ent/dialect/sql"
+	"entgo.io/ent/dialect/sql/sqlhint"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,10 +20,8 @@ func TestBuilder(t *testing.T) {
 				account := N().Named("account").Labels("Account")
 				owner := N().Named("owner").Labels("Person")
 				return Graph("FinGraph").
-					Match(Path().
-						From(N().Labels("Account")).
-						Via(E().Labels("Transfers").RightDirection()).
-						To(account),
+					Match(
+						From(N().Labels("Account")).Via(E().Labels("Transfers").RightDirection()).To(account),
 					).
 					Return(
 						Column(account.F()),
@@ -33,10 +31,8 @@ func TestBuilder(t *testing.T) {
 						Column(account.F()),
 					).
 					Next().
-					Match(Path().
-						To(account).
-						Via(E().Labels("Owns").LeftDirection()).
-						From(owner),
+					Match(
+						To(account).Via(E().Labels("Owns").LeftDirection()).From(owner),
 					).
 					Return(
 						Column(account.F("id")).As("account_id"),
@@ -58,13 +54,11 @@ func TestBuilder(t *testing.T) {
 				a := N().Named("a").Labels("Account")
 				o := E().Named("o").Labels("Owns")
 				return Graph("FinGraph").
-					Match(Path().
-						From(p).
-						Via(o.RightDirection()).
-						To(a),
+					Match(
+						From(p).Via(o.RightDirection()).To(a),
 					).
 					Filter(
-						NEQ(p.F("Id"), "1"),
+						sql.NEQ(p.F("Id"), "1"),
 					).
 					Return(
 						Column(p.F("name")),
@@ -85,10 +79,7 @@ func TestBuilder(t *testing.T) {
 				iter := For("element").In(Expr("[\"all\",\"some\"]")).WithOffset()
 				return Graph("FinGraph").
 					Match(
-						Path().
-							From(p).
-							Via(o.RightDirection()).
-							To(a),
+						From(p).Via(o.RightDirection()).To(a),
 					).
 					For(iter).
 					Return(
@@ -115,10 +106,8 @@ func TestBuilder(t *testing.T) {
 				e := E().Named("e").Labels("Transfers")
 				a := Assign("a", Expr(source.F()))
 				return Graph("FinGraph").
-					Match(Path().
-						From(source).
-						Via(e.RightDirection()).
-						To(destination),
+					Match(
+						From(source).Via(e.RightDirection()).To(destination),
 					).
 					Let(a).
 					Return(
@@ -136,10 +125,8 @@ func TestBuilder(t *testing.T) {
 				destination := N().Named("destination").Labels("Account")
 				e := E().Named("e").Labels("Transfers")
 				return Graph("FinGraph").
-					Match(Path().
-						From(source).
-						Via(e.RightDirection()).
-						To(destination),
+					Match(
+						From(source).Via(e.RightDirection()).To(destination),
 					).
 					OrderBy(
 						Column(source.F("Id")),
@@ -196,10 +183,8 @@ func TestBuilder(t *testing.T) {
 				dst := N().Named("dst").Labels("Account")
 				transfer := E().Named("transfer").Labels("Transfers")
 				return Graph("FinGraph").
-					Match(Path().
-						From(src).
-						Via(transfer.RightDirection()).
-						To(dst),
+					Match(
+						From(src).Via(transfer.RightDirection()).To(dst),
 					).
 					WithDistinct(
 						Column(dst.F()),
@@ -244,15 +229,12 @@ func TestBuilder(t *testing.T) {
 				e := E().Named("e").Labels("Transfers")
 				oa := N().Named("oa").Labels("Account")
 				return Graph("FinGraph").
-					Match(Path().
-						From(p).
-						Via(E().Labels("Owns").RightDirection()).
-						To(a),
+					Match(
+						From(p).Via(E().Labels("Owns").RightDirection()).To(a),
 					).
-					MatchWithHint(Hint{"JOIN_METHOD": "APPLY_JOIN"}, Path().
-						From(a).
-						Via(e.RightDirection()).
-						To(oa),
+					MatchWithHint(
+						sqlhint.JoinHint{sqlhint.JoinMethod: sqlhint.JoinMethodApplyJoin},
+						From(a).Via(e.RightDirection()).To(oa),
 					).
 					Return(
 						Column(oa.F("id")),
@@ -279,10 +261,10 @@ func TestBuilder(t *testing.T) {
 					).As("PersonNames"),
 				)
 			}(),
-			wantQuery: "SELECT `n`.`name`, `n`.`id` FROM GRAPH_TABLE(\n" +
-				"\t`FinGraph`\n" +
-				"\tMATCH (`n`:`Person`)\n" +
-				"\tRETURN `n`\n" +
+			wantQuery: "SELECT `n`.`name`, `n`.`id` FROM GRAPH_TABLE (\n" +
+				"  `FinGraph`\n" +
+				"  MATCH (`n`:`Person`)\n" +
+				"  RETURN `n`\n" +
 				") AS `PersonNames`",
 		},
 		{
@@ -307,12 +289,33 @@ func TestBuilder(t *testing.T) {
 				"MATCH (`p`:`Singer`|(!`Writer`&!`Producer`))\n" +
 				"RETURN `p`.`id`",
 		},
+		{
+			input: func() *GraphQuery {
+				src := N().Named("src").Labels("Account")
+				dst := N().Named("dst").Labels("Account")
+				transfer := E().Labels("Transfers")
+				subpath := From(N().Labels("Account")).Via(transfer.RightDirection()).To(N().Named("mid").Labels("Account").Property("is_blocked", Expr("?", true)))
+				lower := 1
+				upper := 2
+				return Graph("FinGraph").
+					Match(
+						From(src).Path(subpath.Bounded(&lower, &upper)).Via(transfer.RightDirection()).To(dst),
+					).
+					Return(
+						Column(src.F("id")).As("src_account_id"),
+						Column(dst.F("id")).As("dst_account_id"),
+					)
+			}(),
+			wantQuery: "GRAPH `FinGraph`\n" +
+				"MATCH (`src`:`Account`)((:`Account`)-[:`Transfers`]->(`mid`:`Account` {is_blocked: ?})){1, 2}-[:`Transfers`]->(`dst`:`Account`)\n" +
+				"RETURN `src`.`id` AS `src_account_id`, `dst`.`id` AS `dst_account_id`",
+			wantArgs: []any{true},
+		},
 	}
 
 	for i, tt := range tests {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
 			query, args := tt.input.Query()
-			log.Println(query)
 			require.Equal(t, tt.wantQuery, query)
 			require.Equal(t, tt.wantArgs, args)
 		})
