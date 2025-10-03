@@ -353,6 +353,30 @@ func TestBuilder(t *testing.T) {
 				"} AS `results`",
 			wantArgs: []any{"Lee"},
 		},
+		{
+			input: func() *GraphQuery {
+				src := N().Named("src").Labels("Account")
+				mid := N().Named("mid").Labels("Account")
+				dst := N().Named("dst").Labels("Account")
+				t1 := E().Named("t1").Labels("Transfers")
+				t2 := E().Named("t2").Labels("Transfers")
+				p := Assign("p", FExpr(PathFunc(src.F(), t1.F(), mid.F(), t2.F(), dst.F())))
+				return Graph("FinGraph").
+					Match(
+						From(src).Via(t1.RightDirection()).To(mid).Via(t2.RightDirection()).To(dst),
+					).
+					Let(p).
+					Return(
+						FExpr(JSONQuery(FExpr(ToJSON(p.F())).I(0), "'$.labels'")).As("element_a"),
+						FExpr(JSONQuery(FExpr(ToJSON(p.F())).I(1), "'$.labels'")).As("element_b"),
+						FExpr(JSONQuery(FExpr(ToJSON(p.F())).I(2), "'$.labels'")).As("element_c"),
+					)
+			}(),
+			wantQuery: "GRAPH `FinGraph`\n" +
+				"MATCH (`src`:`Account`)-[`t1`:`Transfers`]->(`mid`:`Account`)-[`t2`:`Transfers`]->(`dst`:`Account`)\n" +
+				"LET `p` = PATH(`src`, `t1`, `mid`, `t2`, `dst`)\n" +
+				"RETURN JSON_QUERY(TO_JSON(`p`)[0], '$.labels') AS `element_a`, JSON_QUERY(TO_JSON(`p`)[1], '$.labels') AS `element_b`, JSON_QUERY(TO_JSON(`p`)[2], '$.labels') AS `element_c`",
+		},
 	}
 
 	for i, tt := range tests {

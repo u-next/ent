@@ -1448,7 +1448,7 @@ func Lower(ident string) string {
 
 // Lower wraps the given ident with the LOWER function.
 func (f *Func) Lower(ident string) {
-	f.byName("LOWER", ident)
+	f.ByName("LOWER", ident)
 }
 
 // Count wraps the ident with the COUNT aggregation function.
@@ -1460,7 +1460,7 @@ func Count(ident string) string {
 
 // Count wraps the ident with the COUNT aggregation function.
 func (f *Func) Count(ident string) {
-	f.byName("COUNT", ident)
+	f.ByName("COUNT", ident)
 }
 
 // Max wraps the ident with the MAX aggregation function.
@@ -1472,7 +1472,7 @@ func Max(ident string) string {
 
 // Max wraps the ident with the MAX aggregation function.
 func (f *Func) Max(ident string) {
-	f.byName("MAX", ident)
+	f.ByName("MAX", ident)
 }
 
 // Min wraps the ident with the MIN aggregation function.
@@ -1484,7 +1484,7 @@ func Min(ident string) string {
 
 // Min wraps the ident with the MIN aggregation function.
 func (f *Func) Min(ident string) {
-	f.byName("MIN", ident)
+	f.ByName("MIN", ident)
 }
 
 // Sum wraps the ident with the SUM aggregation function.
@@ -1496,7 +1496,7 @@ func Sum(ident string) string {
 
 // Sum wraps the ident with the SUM aggregation function.
 func (f *Func) Sum(ident string) {
-	f.byName("SUM", ident)
+	f.ByName("SUM", ident)
 }
 
 // Avg wraps the ident with the AVG aggregation function.
@@ -1508,9 +1508,10 @@ func Avg(ident string) string {
 
 // Avg wraps the ident with the AVG aggregation function.
 func (f *Func) Avg(ident string) {
-	f.byName("AVG", ident)
+	f.ByName("AVG", ident)
 }
 
+// TODO: move to conditional expressions
 // Coalesce wraps the ident with the COALESCE function.
 func Coalesce(exprs ...Querier) string {
 	f := ExprFunc(func(b *Builder) {
@@ -1523,12 +1524,22 @@ func Coalesce(exprs ...Querier) string {
 	return q
 }
 
-// byName wraps an identifier with a function name.
-func (f *Func) byName(fn, ident string) {
+// ByName wraps an identifier with a function name.
+func (f *Func) ByName(fn string, ident ...string) {
 	f.Append(func(b *Builder) {
 		f.WriteString(fn)
 		f.Wrap(func(b *Builder) {
-			b.Ident(ident)
+			b.IdentComma(ident...)
+		})
+	})
+}
+
+// ByExpr wraps an expression with a function name.
+func (f *Func) ByExpr(fn string, expr ...Querier) {
+	f.Append(func(b *Builder) {
+		f.WriteString(fn)
+		f.Wrap(func(b *Builder) {
+			b.JoinComma(expr...)
 		})
 	})
 }
@@ -1540,12 +1551,18 @@ func (f *Func) Append(fn func(*Builder)) *Func {
 	return f
 }
 
-// String implements the fmt.Stringer.
-func (f *Func) String() string {
+// Query implements the Querier interface.
+func (f *Func) Query() (string, []any) {
 	for _, fn := range f.fns {
 		fn(&f.Builder)
 	}
-	return f.Builder.String()
+	return f.Builder.String(), f.Builder.GetArgs()
+}
+
+// String implements the fmt.Stringer.
+func (f *Func) String() string {
+	query, _ := f.Query()
+	return query
 }
 
 // As suffixed the given column with an alias (`a` AS `b`).

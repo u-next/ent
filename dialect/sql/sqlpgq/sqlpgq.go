@@ -1709,101 +1709,121 @@ func PropertyExists(element, property string) *sql.Predicate {
 	})
 }
 
-// FuncBuilder is a builder for GQL functions.
-type FuncBuilder struct {
-	sql.Builder
-	name string
-	args []any
-}
-
-// Func creates a new function builder.
-func Func(name string) *FuncBuilder {
-	return &FuncBuilder{name: name}
-}
-
-// Args sets the arguments for the function.
-func (f *FuncBuilder) Args(args ...any) *FuncBuilder {
-	f.args = append(f.args, args...)
-	return f
-}
-
-// Query returns the function call representation.
-func (f *FuncBuilder) Query() (string, []any) {
-	f.WriteString(f.name)
-	f.WriteByte('(')
-	f.Args(f.args...)
-	f.WriteByte(')')
-	return f.String(), f.GetArgs()
-}
-
 // DestinationNodeID returns a new DESTINATION_NODE_ID function builder.
-func DestinationNodeID(edge any) *FuncBuilder {
-	return Func("DESTINATION_NODE_ID").Args(edge)
+func DestinationNodeID(edge *Expression) *sql.Func {
+	var fn sql.Func
+	fn.ByExpr("DESTINATION_NODE_ID", edge)
+	return &fn
 }
 
 // Edges returns a new EDGES function builder.
-func Edges(path any) *FuncBuilder {
-	return Func("EDGES").Args(path)
+func Edges(path *Expression) *sql.Func {
+	var fn sql.Func
+	fn.ByExpr("EDGES", path)
+	return &fn
 }
 
 // ElementID returns a new ELEMENT_ID function builder.
-func ElementID(element any) *FuncBuilder {
-	return Func("ELEMENT_ID").Args(element)
+func ElementID(element *Expression) *sql.Func {
+	var fn sql.Func
+	fn.ByExpr("ELEMENT_ID", element)
+	return &fn
 }
 
 // IsAcyclic returns a new IS_ACYCLIC function builder.
-func IsAcyclic(path any) *FuncBuilder {
-	return Func("IS_ACYCLIC").Args(path)
+func IsAcyclic(path *Expression) *sql.Func {
+	var fn sql.Func
+	fn.ByExpr("IS_ACYCLIC", path)
+	return &fn
 }
 
 // IsSimple returns a new IS_SIMPLE function builder.
-func IsSimple(path any) *FuncBuilder {
-	return Func("IS_SIMPLE").Args(path)
+func IsSimple(path *Expression) *sql.Func {
+	var fn sql.Func
+	fn.ByExpr("IS_SIMPLE", path)
+	return &fn
 }
 
 // IsTrail returns a new IS_TRAIL function builder.
-func IsTrail(path any) *FuncBuilder {
-	return Func("IS_TRAIL").Args(path)
+func IsTrail(path *Expression) *sql.Func {
+	var fn sql.Func
+	fn.ByExpr("IS_TRAIL", path)
+	return &fn
 }
 
 // LabelsFunc returns a new LABELS function builder.
-func LabelsFunc(element any) *FuncBuilder {
-	return Func("LABELS").Args(element)
+func LabelsFunc(element *Expression) *sql.Func {
+	var fn sql.Func
+	fn.ByExpr("LABELS", element)
+	return &fn
 }
 
 // Nodes returns a new NODES function builder.
-func Nodes(path any) *FuncBuilder {
-	return Func("NODES").Args(path)
+func Nodes(path *Expression) *sql.Func {
+	var fn sql.Func
+	fn.ByExpr("NODES", path)
+	return &fn
 }
 
 // PathFunc returns a new PATH function builder.
-func PathFunc(elements ...any) *FuncBuilder {
-	return Func("PATH").Args(elements...)
+func PathFunc(elements ...*Expression) *sql.Func {
+	var fn sql.Func
+	args := make([]sql.Querier, len(elements))
+	for i, e := range elements {
+		args[i] = e
+	}
+	fn.ByExpr("PATH", args...)
+	return &fn
 }
 
 // PathFirst returns a new PATH_FIRST function builder.
-func PathFirst(path any) *FuncBuilder {
-	return Func("PATH_FIRST").Args(path)
+func PathFirst(path *Expression) *sql.Func {
+	var fn sql.Func
+	fn.ByExpr("PATH_FIRST", path)
+	return &fn
 }
 
 // PathLast returns a new PATH_LAST function builder.
-func PathLast(path any) *FuncBuilder {
-	return Func("PATH_LAST").Args(path)
+func PathLast(path *Expression) *sql.Func {
+	var fn sql.Func
+	fn.ByExpr("PATH_LAST", path)
+	return &fn
 }
 
 // PathLength returns a new PATH_LENGTH function builder.
-func PathLength(path any) *FuncBuilder {
-	return Func("PATH_LENGTH").Args(path)
+func PathLength(path *Expression) *sql.Func {
+	var fn sql.Func
+	fn.ByExpr("PATH_LENGTH", path)
+	return &fn
 }
 
 // PropertyNames returns a new PROPERTY_NAMES function builder.
-func PropertyNames(element any) *FuncBuilder {
-	return Func("PROPERTY_NAMES").Args(element)
+func PropertyNames(element *Expression) *sql.Func {
+	var fn sql.Func
+	fn.ByExpr("PROPERTY_NAMES", element)
+	return &fn
 }
 
 // SourceNodeID returns a new SOURCE_NODE_ID function builder.
-func SourceNodeID(edge any) *FuncBuilder {
-	return Func("SOURCE_NODE_ID").Args(edge)
+func SourceNodeID(edge *Expression) *sql.Func {
+	var fn sql.Func
+	fn.ByExpr("SOURCE_NODE_ID", edge)
+	return &fn
+}
+
+// ToJSON marshals the given argument to a valid JSON document.
+// PathFunc returns a new PATH function builder.
+func ToJSON(val *Expression) *sql.Func {
+	var fn sql.Func
+	fn.ByExpr("TO_JSON", val)
+	return &fn
+}
+
+// JSONQuery returns a new JSON_QUERY function builder.
+func JSONQuery(val *Expression, path string) *sql.Func {
+	var fn sql.Func
+	fn.ByExpr("JSON_QUERY", val, sql.Raw(path))
+	return &fn
 }
 
 // ArrayQuery returns an ARRAY expression for the given subquery.
@@ -1852,6 +1872,12 @@ func PExpr(p Pattern) *Expression {
 	return Expr(expr, args...)
 }
 
+// FExpr returns an function SQL expression that implements the Querier interface.
+func FExpr(fn *sql.Func) *Expression {
+	expr, args := fn.Query()
+	return Expr(expr, args...)
+}
+
 type Expression struct {
 	s    string
 	args []any
@@ -1868,13 +1894,25 @@ func (e *Expression) F(fields ...string) *Expression {
 	if e.as != "" {
 		b.Ident(e.as)
 	} else {
-		b.Wrap(func(b *sql.Builder) {
-			b.WriteString(e.s)
-		})
+		b.WriteString(e.s)
 	}
 	for _, field := range fields {
 		b.WriteByte('.').Ident(field)
 	}
+	return Expr(b.String())
+}
+
+// I returns the indexed access expression for the given index.
+func (e *Expression) I(i int) *Expression {
+	var b sql.Builder
+	if e.as != "" {
+		b.Ident(e.as)
+	} else {
+		b.WriteString(e.s)
+	}
+	b.WriteByte('[')
+	b.WriteString(strconv.Itoa(i))
+	b.WriteByte(']')
 	return Expr(b.String())
 }
 
