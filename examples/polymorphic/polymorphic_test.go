@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"entgo.io/ent/dialect/gql/schema"
+	"entgo.io/ent/dialect/sql/schema"
 	"entgo.io/ent/entc/gen"
 	"entgo.io/ent/entc/load"
 	"entgo.io/ent/schema/field"
@@ -200,10 +200,16 @@ func TestPolymorphicEdgePropertyGraph(t *testing.T) {
 	}
 	pg := pgs[0]
 
+	ts, err := graph.Tables()
+	if err != nil {
+		t.Fatalf("Failed generating tables: %v", err)
+	}
+
 	// Generate DDL
-	ddl, err := schema.PropertyGraphDDL(ctx, schema.DDLArgs{
+	ddl, err := schema.DDL(ctx, schema.DDLArgs{
 		Dialect:        "spanner",
-		PropertyGraphs: []*schema.PropertyGraph{pg},
+		PropertyGraphs: pgs,
+		Tables:         ts,
 	})
 	if err != nil {
 		t.Fatalf("Failed generating DDL: %v", err)
