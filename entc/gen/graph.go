@@ -914,6 +914,7 @@ func (g *Graph) PropertyGraphs() (pgs []*schema.PropertyGraph, err error) {
 				continue
 			}
 
+			// Add edge table representation for the edge
 			if err := addPGEdgeElement(pg, n, e); err != nil {
 				return nil, fmt.Errorf("adding edge table for %s.%s: %w", n.Name, e.Name, err)
 			}
@@ -1088,13 +1089,24 @@ func setEdgeKeys(edgeTable *schema.EdgeTable, n *Type, e *Edge) error {
 			return fmt.Errorf("insufficient columns for M2M relationship")
 		}
 		edgeTable.SetKey(schema.NewElementKey(e.Rel.Columns...))
-		sourceColumns := []string{e.Rel.Columns[0]}
+
+		var sourceColumns, destColumns []string
+		if e.IsInverse() {
+			// For inverse edges, the columns are in reverse order from the perspective of this node
+			// The relation columns are defined from the assoc edge perspective, so we need to swap them
+			sourceColumns = []string{e.Rel.Columns[1]} // Current node (inverse owner)
+			destColumns = []string{e.Rel.Columns[0]}   // Target node (assoc owner)
+		} else {
+			// For assoc edges, the column order is source -> destination as defined
+			sourceColumns = []string{e.Rel.Columns[0]} // Current node (assoc owner)
+			destColumns = []string{e.Rel.Columns[1]}   // Target node
+		}
+
 		src = schema.NewReferenceKey(
 			sourceColumns,
 			n.Table(),
 			srcRefCols,
 		)
-		destColumns := []string{e.Rel.Columns[1]}
 		dst = schema.NewReferenceKey(
 			destColumns,
 			e.Type.Table(),
