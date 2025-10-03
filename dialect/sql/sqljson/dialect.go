@@ -177,6 +177,88 @@ func (*postgres) Append(u *sql.UpdateBuilder, column string, elems []any, opts .
 	})
 }
 
+type spanner struct{}
+
+// Append implements the driver.Append method.
+func (d *spanner) Append(u *sql.UpdateBuilder, column string, elems []any, opts ...Option) {
+	setCase(u, column, when{
+		Cond: func(b *sql.Builder) {
+			if len(opts) > 0 {
+				path := identPath(column, opts...)
+				b.WriteString("JSON_TYPE").Wrap(func(b *sql.Builder) {
+					b.WriteString("JSON_QUERY").Wrap(func(b *sql.Builder) {
+						b.Ident(column).Comma()
+						path.spannerPath(b)
+					})
+				})
+			} else {
+				b.WriteString("JSON_TYPE").Wrap(func(b *sql.Builder) {
+					b.Ident(column)
+				})
+			}
+			b.WriteOp(sql.OpIsNull)
+			b.WriteString(" OR ")
+			if len(opts) > 0 {
+				path := identPath(column, opts...)
+				b.WriteString("JSON_QUERY").Wrap(func(b *sql.Builder) {
+					b.Ident(column).Comma()
+					path.spannerPath(b)
+				})
+			} else {
+				b.Ident(column)
+			}
+			b.WriteOp(sql.OpEQ).WriteString("JSON 'null'")
+		},
+		Then: func(b *sql.Builder) {
+			if len(opts) > 0 {
+				b.WriteString("JSON_SET").Wrap(func(b *sql.Builder) {
+					b.Ident(column).Comma()
+					identPath(column, opts...).spannerPath(b)
+					b.Comma().Arg(marshalArg(elems))
+				})
+			} else {
+				b.Arg(marshalArg(elems))
+			}
+		},
+		Else: func(b *sql.Builder) {
+			if len(opts) > 0 {
+				b.WriteString("JSON_ARRAY_APPEND").Wrap(func(b *sql.Builder) {
+					b.Ident(column).Comma()
+					for i, e := range elems {
+						if i > 0 {
+							b.Comma()
+						}
+						identPath(column, opts...).spannerPath(b)
+						b.Comma()
+						d.appendArg(b, e)
+					}
+				})
+			} else {
+				b.WriteString("JSON_ARRAY_APPEND").Wrap(func(b *sql.Builder) {
+					b.Ident(column).Comma()
+					for i, e := range elems {
+						if i > 0 {
+							b.Comma()
+						}
+						b.WriteString("'$'")
+						b.Comma()
+						d.appendArg(b, e)
+					}
+				})
+			}
+		},
+	})
+}
+
+func (d *spanner) appendArg(b *sql.Builder, v any) {
+	switch {
+	case !isPrimitive(v):
+		b.Argf("JSON %s", marshalArg(v))
+	default:
+		b.Arg(v)
+	}
+}
+
 // driver groups all dialect-specific methods.
 type driver interface {
 	Append(u *sql.UpdateBuilder, column string, elems []any, opts ...Option)
@@ -190,6 +272,8 @@ func newDriver(name string) (driver, error) {
 		return (*mysql)(nil), nil
 	case dialect.Postgres:
 		return (*postgres)(nil), nil
+	case dialect.Spanner:
+		return (*spanner)(nil), nil
 	default:
 		return nil, fmt.Errorf("sqljson: unknown driver %q", name)
 	}

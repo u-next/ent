@@ -399,6 +399,44 @@ func TestWritePath(t *testing.T) {
 				),
 			wantQuery: "SELECT * FROM `users` ORDER BY JSON_LENGTH(`a`, '$.b')",
 		},
+		{
+			input: sql.Dialect(dialect.Spanner).
+				Select("*").
+				From(sql.Table("users")).
+				Where(sqljson.ValueEQ("a", 1, sqljson.Path("b", "c", "[1]", "d"))),
+			wantQuery: `SELECT * FROM ` + "`users`" + ` WHERE JSON_VALUE(` + "`a`" + `, '$.b.c[1].d') = ?`,
+			wantArgs:  []any{1},
+		},
+		{
+			input: sql.Dialect(dialect.Spanner).
+				Select("*").
+				From(sql.Table("users")).
+				Where(sqljson.HasKey("j", sqljson.DotPath("a.b.c"))),
+			wantQuery: "SELECT * FROM `users` WHERE JSON_TYPE(JSON_QUERY(`j`, '$.a.b.c')) IS NOT NULL",
+		},
+		{
+			input: sql.Dialect(dialect.Spanner).
+				Select("*").
+				From(sql.Table("users")).
+				Where(sqljson.ValueIsNull("c", sqljson.Path("a"))),
+			wantQuery: `SELECT * FROM ` + "`users`" + ` WHERE JSON_QUERY(` + "`c`" + `, '$.a') = JSON 'null'`,
+		},
+		{
+			input: sql.Dialect(dialect.Spanner).
+				Select("*").
+				From(sql.Table("users")).
+				Where(sqljson.ValueContains("tags", "foo")),
+			wantQuery: "SELECT * FROM `users` WHERE JSON_CONTAINS(`tags`, ?)",
+			wantArgs:  []any{`"foo"`},
+		},
+		{
+			input: sql.Dialect(dialect.Spanner).
+				Select("*").
+				From(sql.Table("users")).
+				Where(sqljson.LenEQ("a", 1, sqljson.Path("b"))),
+			wantQuery: "SELECT * FROM `users` WHERE JSON_ARRAY_LENGTH(JSON_QUERY(`a`, '$.b')) = ?",
+			wantArgs:  []any{1},
+		},
 	}
 	for i, tt := range tests {
 		t.Run(strconv.Itoa(i), func(t *testing.T) {
@@ -523,6 +561,24 @@ func TestAppend(t *testing.T) {
 			}(),
 			wantQuery: "UPDATE `t` SET `c` = CASE WHEN (JSON_TYPE(JSON_EXTRACT(`c`, '$.a')) IS NULL OR JSON_TYPE(JSON_EXTRACT(`c`, '$.a')) = 'NULL') THEN JSON_SET(`c`, '$.a', JSON_ARRAY(?)) ELSE JSON_ARRAY_APPEND(`c`, '$.a', ?) END",
 			wantArgs:  []any{"a", "a"},
+		},
+		{
+			input: func() sql.Querier {
+				u := sql.Dialect(dialect.Spanner).Update("t")
+				sqljson.Append(u, "c", []string{"a"})
+				return u
+			}(),
+			wantQuery: "UPDATE `t` SET `c` = CASE WHEN (JSON_TYPE(`c`) IS NULL OR `c` = JSON 'null') THEN ? ELSE JSON_ARRAY_APPEND(`c`, '$', ?) END",
+			wantArgs:  []any{`["a"]`, "a"},
+		},
+		{
+			input: func() sql.Querier {
+				u := sql.Dialect(dialect.Spanner).Update("t")
+				sqljson.Append(u, "c", []string{"a"}, sqljson.Path("a"))
+				return u
+			}(),
+			wantQuery: "UPDATE `t` SET `c` = CASE WHEN (JSON_TYPE(JSON_QUERY(`c`, '$.a')) IS NULL OR JSON_QUERY(`c`, '$.a') = JSON 'null') THEN JSON_SET(`c`, '$.a', ?) ELSE JSON_ARRAY_APPEND(`c`, '$.a', ?) END",
+			wantArgs:  []any{`["a"]`, "a"},
 		},
 	}
 	for i, tt := range tests {

@@ -28,6 +28,15 @@ func HasKey(column string, opts ...Option) *sql.Predicate {
 			path := identPath(column, opts...)
 			path.mysqlFunc("JSON_TYPE", b)
 			b.WriteOp(sql.OpNotNull)
+		case dialect.Spanner:
+			path := identPath(column, opts...)
+			b.WriteString("JSON_TYPE").Wrap(func(b *sql.Builder) {
+				b.WriteString("JSON_QUERY").Wrap(func(b *sql.Builder) {
+					b.Ident(column).Comma()
+					path.spannerPath(b)
+				})
+			})
+			b.WriteOp(sql.OpNotNull)
 		default:
 			valuePath(b, column, opts...)
 			b.WriteOp(sql.OpNotNull)
@@ -59,6 +68,17 @@ func ValueIsNull(column string, opts ...Option) *sql.Predicate {
 			path := identPath(column, opts...)
 			path.mysqlFunc("JSON_TYPE", b)
 			b.WriteOp(sql.OpEQ).WriteString("'null'")
+		case dialect.Spanner:
+			if len(opts) > 0 {
+				path := identPath(column, opts...)
+				b.WriteString("JSON_QUERY").Wrap(func(b *sql.Builder) {
+					b.Ident(column).Comma()
+					path.spannerPath(b)
+				})
+			} else {
+				b.Ident(column)
+			}
+			b.WriteOp(sql.OpEQ).WriteString("JSON 'null'")
 		}
 	})
 }
@@ -84,6 +104,17 @@ func ValueIsNotNull(column string, opts ...Option) *sql.Predicate {
 				b.WriteString("'null'").Comma()
 				path.mysqlPath(b)
 			}).WriteString(")")
+		case dialect.Spanner:
+			if len(opts) > 0 {
+				path := identPath(column, opts...)
+				b.WriteString("JSON_QUERY").Wrap(func(b *sql.Builder) {
+					b.Ident(column).Comma()
+					path.spannerPath(b)
+				})
+			} else {
+				b.Ident(column)
+			}
+			b.WriteOp(sql.OpNEQ).WriteString("JSON 'null'")
 		}
 	})
 }
@@ -95,6 +126,7 @@ func ValueIsNotNull(column string, opts ...Option) *sql.Predicate {
 func ValueEQ(column string, arg any, opts ...Option) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
 		opts = normalizePG(b, arg, opts)
+		opts = normalizeSpanner(b, arg, opts)
 		valuePath(b, column, opts...)
 		b.WriteOp(sql.OpEQ)
 		// Inline boolean values, as some drivers (e.g., MySQL) encode them as 0/1.
@@ -113,6 +145,7 @@ func ValueEQ(column string, arg any, opts ...Option) *sql.Predicate {
 func ValueNEQ(column string, arg any, opts ...Option) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
 		opts = normalizePG(b, arg, opts)
+		opts = normalizeSpanner(b, arg, opts)
 		valuePath(b, column, opts...)
 		b.WriteOp(sql.OpNEQ).Arg(arg)
 	})
@@ -125,6 +158,7 @@ func ValueNEQ(column string, arg any, opts ...Option) *sql.Predicate {
 func ValueGT(column string, arg any, opts ...Option) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
 		opts = normalizePG(b, arg, opts)
+		opts = normalizeSpanner(b, arg, opts)
 		valuePath(b, column, opts...)
 		b.WriteOp(sql.OpGT).Arg(arg)
 	})
@@ -138,6 +172,7 @@ func ValueGT(column string, arg any, opts ...Option) *sql.Predicate {
 func ValueGTE(column string, arg any, opts ...Option) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
 		opts = normalizePG(b, arg, opts)
+		opts = normalizeSpanner(b, arg, opts)
 		valuePath(b, column, opts...)
 		b.WriteOp(sql.OpGTE).Arg(arg)
 	})
@@ -150,6 +185,7 @@ func ValueGTE(column string, arg any, opts ...Option) *sql.Predicate {
 func ValueLT(column string, arg any, opts ...Option) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
 		opts = normalizePG(b, arg, opts)
+		opts = normalizeSpanner(b, arg, opts)
 		valuePath(b, column, opts...)
 		b.WriteOp(sql.OpLT).Arg(arg)
 	})
@@ -163,6 +199,7 @@ func ValueLT(column string, arg any, opts ...Option) *sql.Predicate {
 func ValueLTE(column string, arg any, opts ...Option) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
 		opts = normalizePG(b, arg, opts)
+		opts = normalizeSpanner(b, arg, opts)
 		valuePath(b, column, opts...)
 		b.WriteOp(sql.OpLTE).Arg(arg)
 	})
@@ -196,6 +233,18 @@ func ValueContains(column string, arg any, opts ...Option) *sql.Predicate {
 			path.Cast = "jsonb"
 			path.value(b)
 			b.WriteString(" @> ").Arg(marshalArg(arg))
+		case dialect.Spanner:
+			b.WriteString("JSON_CONTAINS").Wrap(func(b *sql.Builder) {
+				if len(opts) > 0 {
+					b.WriteString("JSON_QUERY").Wrap(func(b *sql.Builder) {
+						b.Ident(column).Comma()
+						path.spannerPath(b)
+					})
+				} else {
+					b.Ident(column)
+				}
+				b.Comma().Arg(marshalArg(arg))
+			})
 		}
 	})
 }
@@ -256,6 +305,7 @@ func valueInOp(column string, args []any, opts []Option, op sql.Op) *sql.Predica
 		}
 		if len(args) > 0 {
 			opts = normalizePG(b, args[0], opts)
+			opts = normalizeSpanner(b, args[0], opts)
 		}
 		valuePath(b, column, opts...)
 		b.WriteOp(op)
@@ -520,6 +570,18 @@ func (p *PathOptions) value(b *sql.Builder) {
 			defer b.WriteString(")::" + p.Cast)
 		}
 		p.pgTextPath(b)
+	case b.Dialect() == dialect.Spanner:
+		if p.Unquote {
+			b.WriteString("JSON_VALUE").Wrap(func(b *sql.Builder) {
+				b.Ident(p.Ident).Comma()
+				p.spannerPath(b)
+			})
+		} else {
+			b.WriteString("JSON_QUERY").Wrap(func(b *sql.Builder) {
+				b.Ident(p.Ident).Comma()
+				p.spannerPath(b)
+			})
+		}
 	default:
 		if p.Unquote && b.Dialect() == dialect.MySQL {
 			b.WriteString("JSON_UNQUOTE(")
@@ -538,6 +600,17 @@ func (p *PathOptions) length(b *sql.Builder) {
 		b.WriteByte(')')
 	case b.Dialect() == dialect.MySQL:
 		p.mysqlFunc("JSON_LENGTH", b)
+	case b.Dialect() == dialect.Spanner:
+		b.WriteString("JSON_ARRAY_LENGTH").Wrap(func(b *sql.Builder) {
+			if len(p.Path) > 0 {
+				b.WriteString("JSON_QUERY").Wrap(func(b *sql.Builder) {
+					b.Ident(p.Ident).Comma()
+					p.spannerPath(b)
+				})
+			} else {
+				b.Ident(p.Ident)
+			}
+		})
 	default:
 		p.mysqlFunc("JSON_ARRAY_LENGTH", b)
 	}
@@ -597,6 +670,22 @@ func (p *PathOptions) pgArrayPath(b *sql.Builder) {
 		b.WriteString(s)
 	}
 	b.WriteString("}'")
+}
+
+// spannerPath writes the JSON path in Spanner JSONPath format: '$.a.b[1].c'.
+func (p *PathOptions) spannerPath(b *sql.Builder) {
+	b.WriteString(`'$`)
+	for _, s := range p.Path {
+		switch _, isIndex := isJSONIdx(s); {
+		case isIndex:
+			b.WriteString(s)
+		case s == "*" || isQuoted(s) || isIdentifier(s):
+			b.WriteString("." + s)
+		default:
+			b.WriteString(`."` + s + `"`)
+		}
+	}
+	b.WriteByte('\'')
 }
 
 // ParsePath parses the "dotpath" for the DotPath option.
@@ -668,6 +757,15 @@ func normalizePG(b *sql.Builder, arg any, opts []Option) []Option {
 	case int8, int16, int32, int64, int, uint8, uint16, uint32, uint64:
 		base = append(base, Cast("int"))
 	}
+	return append(base, opts...)
+}
+
+// normalizeSpanner adds unquote option for scalar values in Spanner.
+func normalizeSpanner(b *sql.Builder, arg any, opts []Option) []Option {
+	if b.Dialect() != dialect.Spanner {
+		return opts
+	}
+	base := []Option{Unquote(true)}
 	return append(base, opts...)
 }
 

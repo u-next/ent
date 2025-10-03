@@ -258,9 +258,7 @@ func TestBuilder(t *testing.T) {
 				).From(
 					GraphTable(Graph("FinGraph").
 						Match(n).
-						Return(
-							n.F(),
-						),
+						Return(n.F()),
 					).As("PersonNames"),
 				)
 			}(),
