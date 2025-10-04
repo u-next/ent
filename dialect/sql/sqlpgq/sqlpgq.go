@@ -87,21 +87,6 @@ func (g *GraphQuery) Return(items ...string) *GraphQuery {
 	return g
 }
 
-// ReturnExpr adds a RETURN statement with expressions to the linear query.
-func (g *GraphQuery) ReturnExpr(exprs ...sql.Querier) *GraphQuery {
-	if len(g.stmts) == 0 {
-		return g.Append(ReturnExpr(exprs...))
-	}
-	last := g.stmts[len(g.stmts)-1]
-	switch last := last.(type) {
-	case *ReturnBuilder:
-		last.AppendItemExpr(exprs...)
-	default:
-		g.Append(ReturnExpr(exprs...))
-	}
-	return g
-}
-
 // ReturnExprAs adds a return expression with an alias to the last RETURN statement.
 func (g *GraphQuery) ReturnExprAs(expr sql.Querier, as string) *GraphQuery {
 	if len(g.stmts) == 0 {
@@ -113,6 +98,21 @@ func (g *GraphQuery) ReturnExprAs(expr sql.Querier, as string) *GraphQuery {
 		last.AppendItemExprAs(expr, as)
 	default:
 		g.Append(Return().AppendItemExprAs(expr, as))
+	}
+	return g
+}
+
+// ReturnFuncAs adds a return expression built using the given function with an alias to the last RETURN statement.
+func (g *GraphQuery) ReturnFuncAs(f func(*sql.Builder), as string) *GraphQuery {
+	if len(g.stmts) == 0 {
+		return g.Append(Return().AppendItemFuncAs(f, as))
+	}
+	last := g.stmts[len(g.stmts)-1]
+	switch last := last.(type) {
+	case *ReturnBuilder:
+		last.AppendItemFuncAs(f, as)
+	default:
+		g.Append(Return().AppendItemFuncAs(f, as))
 	}
 	return g
 }
@@ -184,37 +184,37 @@ func (g *GraphQuery) WithDistinct(items ...string) *GraphQuery {
 
 // Next chains multiple linear queries with NEXT statements.
 func (g *GraphQuery) Next() *GraphQuery {
-	return g.Append(Next())
+	return g.Append(Next)
 }
 
 // UnionAll adds a UNION ALL operation to the composite query.
 func (g *GraphQuery) UnionAll() *GraphQuery {
-	return g.Append(UnionAll())
+	return g.Append(UnionAll)
 }
 
 // UnionDistinct adds a UNION DISTINCT operation to the composite query.
 func (g *GraphQuery) UnionDistinct() *GraphQuery {
-	return g.Append(UnionDistinct())
+	return g.Append(UnionDistinct)
 }
 
 // IntersectAll adds an INTERSECT ALL operation to the composite query.
 func (g *GraphQuery) IntersectAll() *GraphQuery {
-	return g.Append(IntersectAll())
+	return g.Append(IntersectAll)
 }
 
 // IntersectDistinct adds an INTERSECT DISTINCT operation to the composite query.
 func (g *GraphQuery) IntersectDistinct() *GraphQuery {
-	return g.Append(IntersectDistinct())
+	return g.Append(IntersectDistinct)
 }
 
 // ExceptAll adds an EXCEPT ALL operation to the composite query.
 func (g *GraphQuery) ExceptAll() *GraphQuery {
-	return g.Append(ExceptAll())
+	return g.Append(ExceptAll)
 }
 
 // ExceptDistinct adds an EXCEPT DISTINCT operation to the composite query.
 func (g *GraphQuery) ExceptDistinct() *GraphQuery {
-	return g.Append(ExceptDistinct())
+	return g.Append(ExceptDistinct)
 }
 
 // Query returns the GQL query representation.
@@ -348,11 +348,6 @@ func Return(items ...string) *ReturnBuilder {
 	return (&ReturnBuilder{}).Return(items...)
 }
 
-// ReturnExpr creates a new RETURN statement builder with expressions.
-func ReturnExpr(exprs ...sql.Querier) *ReturnBuilder {
-	return (&ReturnBuilder{}).ReturnExpr(exprs...)
-}
-
 // Return changes the return items to the given columns.
 // If no items are given, it defaults to returning all columns (*).
 func (r *ReturnBuilder) Return(items ...string) *ReturnBuilder {
@@ -382,26 +377,17 @@ func (r *ReturnBuilder) AppendItemAs(it, as string) *ReturnBuilder {
 	return r
 }
 
-// ReturnExpr adds a return expression to the RETURN statement.
-func (r *ReturnBuilder) ReturnExpr(expr ...sql.Querier) *ReturnBuilder {
-	r.items = make([]item, len(expr))
-	for i := range expr {
-		r.items[i] = item{x: expr[i]}
-	}
-	return r
-}
-
-// AppendItemExpr adds more return expressions to the RETURN statement.
-func (r *ReturnBuilder) AppendItemExpr(exprs ...sql.Querier) *ReturnBuilder {
-	for _, expr := range exprs {
-		r.items = append(r.items, item{x: expr})
-	}
-	return r
-}
-
 // AppendItemExprAs adds a return expression to the RETURN statement with the given alias.
 func (r *ReturnBuilder) AppendItemExprAs(expr sql.Querier, as string) *ReturnBuilder {
 	r.items = append(r.items, item{x: expr, as: as})
+	return r
+}
+
+// AppendItemFuncAs adds a return expression built using the given function to the RETURN statement with the given alias.
+func (r *ReturnBuilder) AppendItemFuncAs(f func(*sql.Builder), as string) *ReturnBuilder {
+	var b sql.Builder
+	f(&b)
+	r.items = append(r.items, item{x: &b, as: as})
 	return r
 }
 
@@ -494,21 +480,21 @@ func (r *ReturnBuilder) stmt() {}
 
 // assignment represents a variable assignment in a LET statement.
 type assignment struct {
-	variable Variable
+	variable Var
 	value    sql.Querier
 }
 
 // Assign creates a new assignment expression.
 func Assign(name string, value sql.Querier) *assignment {
 	return &assignment{
-		variable: Variable(name),
+		variable: Var(name),
 		value:    value,
 	}
 }
 
 // Var sets the variable name to assign to.
 func (a *assignment) Var(name string) *assignment {
-	a.variable = Variable(name)
+	a.variable = Var(name)
 	return a
 }
 
@@ -731,19 +717,19 @@ func (o *OffsetBuilder) stmt() {}
 // ForBuilder is a builder for FOR statements.
 type ForBuilder struct {
 	sql.Builder
-	element Variable
+	element Var
 	array   sql.Querier
 	offset  string
 }
 
 // Element creates a new FOR statement builder with the given element name.
 func Element(name string) *ForBuilder {
-	return &ForBuilder{element: Variable(name)}
+	return &ForBuilder{element: Var(name)}
 }
 
 // Element sets the element variable name.
 func (f *ForBuilder) Element(name string) *ForBuilder {
-	f.element = Variable(name)
+	f.element = Var(name)
 	return f
 }
 
@@ -801,26 +787,6 @@ func (f *ForBuilder) Offset() string {
 }
 
 func (f *ForBuilder) stmt() {}
-
-// NextBuilder is a builder for NEXT statements.
-type NextBuilder struct {
-	sql.Builder
-}
-
-// Next creates a new NEXT statement builder.
-func Next() *NextBuilder {
-	return &NextBuilder{}
-}
-
-// Query returns the NEXT statement representation.
-func (n *NextBuilder) Query() (string, []any) {
-	n.NewLine()
-	n.WriteString("NEXT")
-	n.NewLine()
-	return n.String(), n.GetArgs()
-}
-
-func (n *NextBuilder) stmt() {}
 
 // WithBuilder is a builder for WITH statements.
 type WithBuilder struct {
@@ -880,51 +846,28 @@ func (w *WithBuilder) Query() (string, []any) {
 
 func (w *WithBuilder) stmt() {}
 
-type SetOperation func(*sql.Builder)
+// StatementKeyword represents simple SQL statement keywords that implement sql.Querier.
+type StatementKeyword string
 
-func (s SetOperation) Query() (string, []any) {
-	b := &sql.Builder{}
-	s(b)
-	return b.String(), b.GetArgs()
-}
-
-func (s SetOperation) stmt() {}
-
-func UnionAll() SetOperation {
-	return func(b *sql.Builder) {
-		b.WriteString("UNION ALL")
+func (sk StatementKeyword) Query() (string, []any) {
+	if sk == Next {
+		return "\n" + string(sk) + "\n", nil
 	}
+	return string(sk), nil
 }
 
-func UnionDistinct() SetOperation {
-	return func(b *sql.Builder) {
-		b.WriteString("UNION DISTINCT")
-	}
-}
+func (sk StatementKeyword) stmt() {}
 
-func IntersectAll() SetOperation {
-	return func(b *sql.Builder) {
-		b.WriteString("INTERSECT ALL")
-	}
-}
-
-func IntersectDistinct() SetOperation {
-	return func(b *sql.Builder) {
-		b.WriteString("INTERSECT DISTINCT")
-	}
-}
-
-func ExceptAll() SetOperation {
-	return func(b *sql.Builder) {
-		b.WriteString("EXCEPT ALL")
-	}
-}
-
-func ExceptDistinct() SetOperation {
-	return func(b *sql.Builder) {
-		b.WriteString("EXCEPT DISTINCT")
-	}
-}
+// Set operation constants for composite queries.
+const (
+	UnionAll          StatementKeyword = "UNION ALL"
+	UnionDistinct     StatementKeyword = "UNION DISTINCT"
+	IntersectAll      StatementKeyword = "INTERSECT ALL"
+	IntersectDistinct StatementKeyword = "INTERSECT DISTINCT"
+	ExceptAll         StatementKeyword = "EXCEPT ALL"
+	ExceptDistinct    StatementKeyword = "EXCEPT DISTINCT"
+	Next              StatementKeyword = "NEXT"
+)
 
 // GraphTableWrapper is a builder for GRAPH_TABLE operator in SQL queries.
 type GraphTableWrapper struct {
@@ -1040,7 +983,7 @@ type Pattern interface {
 // PathPattern is a builder for path patterns.
 type PathPattern struct {
 	sql.Builder
-	variable     Variable
+	variable     Var
 	searchPrefix PathSearchPrefix
 	pathMode     PathMode
 	elements     []sql.Querier
@@ -1091,9 +1034,9 @@ func (p *PathPattern) Path(path *PathPattern) *PathPattern {
 	return p
 }
 
-// Variable sets the path variable.
-func (p *PathPattern) Variable(name string) *PathPattern {
-	p.variable = Variable(name)
+// Named sets the path variable name.
+func (p *PathPattern) Named(name string) *PathPattern {
+	p.variable = Var(name)
 	return p
 }
 
@@ -1226,7 +1169,7 @@ func Node(name string, labels ...string) *NodePattern {
 
 // Named sets the node variable.
 func (n *NodePattern) Named(name string) *NodePattern {
-	n.filler.variable = Variable(name)
+	n.filler.variable = Var(name)
 	return n
 }
 
@@ -1327,27 +1270,27 @@ func Edge(name string, labels ...string) *EdgePattern {
 	return E().Named(name).Labels(labels...)
 }
 
-// LeftDirection sets the edge direction to left.
-func (e *EdgePattern) LeftDirection() *EdgePattern {
+// In sets the edge direction to left.
+func (e *EdgePattern) In() *EdgePattern {
 	e.direction = EdgeLeft
 	return e
 }
 
-// RightDirection sets the edge direction to right.
-func (e *EdgePattern) RightDirection() *EdgePattern {
+// Out sets the edge direction to right.
+func (e *EdgePattern) Out() *EdgePattern {
 	e.direction = EdgeRight
 	return e
 }
 
-// AnyDirection sets the edge direction to any.
-func (e *EdgePattern) AnyDirection() *EdgePattern {
+// Any sets the edge direction to any.
+func (e *EdgePattern) Any() *EdgePattern {
 	e.direction = EdgeAnyDirection
 	return e
 }
 
 // Named sets the edge variable.
 func (e *EdgePattern) Named(name string) *EdgePattern {
-	e.filler.variable = Variable(name)
+	e.filler.variable = Var(name)
 	return e
 }
 
@@ -1419,7 +1362,7 @@ func (e *EdgePattern) pattern() {}
 
 type patternFiller struct {
 	sql.Builder
-	variable   Variable
+	variable   Var
 	labelExpr  *labelExpr
 	properties map[string]sql.Querier
 	where      *sql.Predicate
@@ -1855,9 +1798,9 @@ func ValueQuery(expr *GraphQuery) sql.Querier {
 	})
 }
 
-type Variable string
+type Var string
 
-func (v Variable) Query() (string, []any) {
+func (v Var) Query() (string, []any) {
 	var b sql.Builder
 	if b.IsIdent(string(v)) {
 		b.WriteString(string(v))
@@ -1867,7 +1810,7 @@ func (v Variable) Query() (string, []any) {
 	return b.Query()
 }
 
-func (v Variable) F(fields ...string) string {
+func (v Var) F(fields ...string) string {
 	var b sql.Builder
 	b.Ident(string(v))
 	for _, f := range fields {

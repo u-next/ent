@@ -823,3 +823,12 @@ func marshalArg(arg any) any {
 	}
 	return arg
 }
+
+// ToJSON marshals the given argument to a valid JSON document.
+func ToJSON(value string) func(*sql.Builder) {
+	return func(b *sql.Builder) {
+		b.WriteString("TO_JSON(")
+		b.WriteString(value)
+		b.WriteString(")")
+	}
+}

@@ -22,7 +22,7 @@ func TestBuilder(t *testing.T) {
 				owner := N().Named("owner").Labels("Person")
 				return Graph("FinGraph").
 					Match(
-						From(NodeL("Account")).Via(EdgeL("Transfers").RightDirection()).To(account),
+						From(NodeL("Account")).Via(EdgeL("Transfers").Out()).To(account),
 					).
 					Return(
 						account.F(),
@@ -31,7 +31,7 @@ func TestBuilder(t *testing.T) {
 					GroupBy(account.F()).
 					Next().
 					Match(
-						To(account).Via(EdgeL("Owns").LeftDirection()).From(owner),
+						To(account).Via(EdgeL("Owns").In()).From(owner),
 					).
 					ReturnAs(account.F("id"), "account_id").
 					ReturnAs(owner.F("name"), "owner_name").
@@ -52,7 +52,7 @@ func TestBuilder(t *testing.T) {
 				o := Edge("o", "Owns")
 				return Graph("FinGraph").
 					Match(
-						From(p).Via(o.RightDirection()).To(a),
+						From(p).Via(o.Out()).To(a),
 					).
 					Filter(
 						sql.NEQ(p.F("Id"), "1"),
@@ -74,7 +74,7 @@ func TestBuilder(t *testing.T) {
 				iter := Element("element").In(sql.Expr("?", []string{"all", "some"})).WithOffset()
 				return Graph("FinGraph").
 					Match(
-						From(p).Via(o.RightDirection()).To(a),
+						From(p).Via(o.Out()).To(a),
 					).
 					For(iter).
 					Return(
@@ -100,10 +100,10 @@ func TestBuilder(t *testing.T) {
 				source := Node("source", "Account")
 				destination := Node("destination", "Account")
 				e := Edge("e", "Transfers")
-				a := Assign("a", sql.Expr(source.F()))
+				a := Assign("a", Var(source.F()))
 				return Graph("FinGraph").
 					Match(
-						From(source).Via(e.RightDirection()).To(destination),
+						From(source).Via(e.Out()).To(destination),
 					).
 					Let(a).
 					ReturnAs(a.F("id"), "a_id")
@@ -120,7 +120,7 @@ func TestBuilder(t *testing.T) {
 				e := Edge("e", "Transfers")
 				return Graph("FinGraph").
 					Match(
-						From(source).Via(e.RightDirection()).To(destination),
+						From(source).Via(e.Out()).To(destination),
 					).
 					OrderBy(
 						source.F("Id"),
@@ -178,7 +178,7 @@ func TestBuilder(t *testing.T) {
 				transfer := Edge("transfer", "Transfers")
 				return Graph("FinGraph").
 					Match(
-						From(src).Via(transfer.RightDirection()).To(dst),
+						From(src).Via(transfer.Out()).To(dst),
 					).
 					WithDistinct(dst.F()).
 					ReturnAs(dst.F("id"), "destination_id")
@@ -215,11 +215,11 @@ func TestBuilder(t *testing.T) {
 				oa := Node("oa", "Account")
 				return Graph("FinGraph").
 					Match(
-						From(p).Via(EdgeL("Owns").RightDirection()).To(a),
+						From(p).Via(EdgeL("Owns").Out()).To(a),
 					).
 					MatchWithHint(
 						sqlhint.JoinHint{sqlhint.JoinMethod: sqlhint.JoinMethodApplyJoin},
-						From(a).Via(e.RightDirection()).To(oa),
+						From(a).Via(e.Out()).To(oa),
 					).
 					Return(
 						oa.F("id"),
@@ -276,12 +276,12 @@ func TestBuilder(t *testing.T) {
 				src := Node("src", "Account")
 				dst := Node("dst", "Account")
 				transfer := EdgeL("Transfers")
-				subpath := From(NodeL("Account")).Via(transfer.RightDirection()).To(Node("mid", "Account").Property("is_blocked", sql.Expr("?", true)))
+				subpath := From(NodeL("Account")).Via(transfer.Out()).To(Node("mid", "Account").Property("is_blocked", sql.Expr("?", true)))
 				lower := 1
 				upper := 2
 				return Graph("FinGraph").
 					Match(
-						From(src).Path(subpath.Bounded(&lower, &upper)).Via(transfer.RightDirection()).To(dst),
+						From(src).Path(subpath.Bounded(&lower, &upper)).Via(transfer.Out()).To(dst),
 					).
 					Return(
 						sql.As(src.F("id"), "src_account_id"),
@@ -300,13 +300,13 @@ func TestBuilder(t *testing.T) {
 				dst := Node("dst").Labels("Account")
 				t1 := Edge("t1").Labels("Transfers")
 				t2 := Edge("t2").Labels("Transfers")
-				p := From(src).Via(t1.RightDirection()).To(mid).Variable("p")
-				q := From(mid).Via(t2.RightDirection()).To(dst).Variable("q")
+				p := From(src).Via(t1.Out()).To(mid).Named("p")
+				q := From(mid).Via(t2.Out()).To(dst).Named("q")
 				fullPath := Assign("full_path", Concat(p, q))
 				return Graph("FinGraph").
 					Match(p, q).
 					Let(fullPath).
-					ReturnAs("TO_JSON(`full_path`)", "results")
+					ReturnFuncAs(sqljson.ToJSON(fullPath.F()), "results")
 			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
 				"MATCH `p` = (`src`:`Account`)-[`t1`:`Transfers`]->(`mid`:`Account`), `q` = (`mid`:`Account`)-[`t2`:`Transfers`]->(`dst`:`Account`)\n" +
@@ -319,7 +319,7 @@ func TestBuilder(t *testing.T) {
 				a := Node("a").Labels("Account")
 				o := Edge("o").Labels("Owns")
 				match := Match(
-					From(p).Via(o.RightDirection()).To(a),
+					From(p).Via(o.Out()).To(a),
 				)
 				return Graph("FinGraph").
 					ReturnExprAs(ExistsQuery(match), "results")
@@ -340,7 +340,7 @@ func TestBuilder(t *testing.T) {
 				p := Assign("p", sql.ExprFunc(Paths(src.F(), t1.F(), mid.F(), t2.F(), dst.F())))
 				return Graph("FinGraph").
 					Match(
-						From(src).Via(t1.RightDirection()).To(mid).Via(t2.RightDirection()).To(dst),
+						From(src).Via(t1.Out()).To(mid).Via(t2.Out()).To(dst),
 					).
 					Let(p).
 					ReturnExprAs(sqljson.ValuePath("TO_JSON(`p`)[0]", sqljson.Path("labels")), "element_a").
