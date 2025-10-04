@@ -1353,6 +1353,16 @@ func N() *NodePattern {
 	}
 }
 
+// NodeL creates a new node pattern builder with the given label.
+func NodeL(label string) *NodePattern {
+	return N().Labels(label)
+}
+
+// Node creates a new node pattern builder.
+func Node(name string, labels ...string) *NodePattern {
+	return N().Named(name).Labels(labels...)
+}
+
 // Named sets the node variable.
 func (n *NodePattern) Named(name string) *NodePattern {
 	n.filler.variable = name
@@ -1444,6 +1454,16 @@ func E() *EdgePattern {
 		direction: EdgeAnyDirection,
 		filler:    &patternFiller{properties: make(map[string]sql.Querier)},
 	}
+}
+
+// EdgeL creates a new edge pattern builder with the given label.
+func EdgeL(label string) *EdgePattern {
+	return E().Labels(label)
+}
+
+// Edge creates a new edge pattern builder.
+func Edge(name string, labels ...string) *EdgePattern {
+	return E().Named(name).Labels(labels...)
 }
 
 // LeftDirection sets the edge direction to left.
