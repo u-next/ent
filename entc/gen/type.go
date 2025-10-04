@@ -2263,8 +2263,15 @@ func (e Edge) Index() (int, error) {
 	return 0, fmt.Errorf("edge %q was not found in its owner schema %q", e.Name, e.Owner.Name)
 }
 
-// EdgeTableName returns the edge table name for property graph.
 func (e Edge) EdgeTableName() string {
+	if ant := e.Type.EntSQL(); ant != nil && ant.PascalCase {
+		return pascal(e.Name)
+	}
+	return snake(e.Name)
+}
+
+// EdgeTableAlias returns the edge table alias in property graph.
+func (e Edge) EdgeTableAlias() string {
 	if e.IsInverse() {
 		if ant := e.Type.EntSQL(); ant != nil && ant.PascalCase {
 			return e.Ref.Type.Table() + pascal(e.Name)

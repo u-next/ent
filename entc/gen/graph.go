@@ -957,9 +957,10 @@ func addPGEdgeElement(pg *schema.PropertyGraph, n *Type, e *Edge) error {
 				continue
 			}
 			// Create unique edge table name for this type combination.
-			edgeTableName := fmt.Sprintf("%s_%s_%s", n.Table(), e.Name, targetType.Table())
+			fullName := fmt.Sprintf("%s_%s_%s", n.Table(), e.Name, targetType.Table())
 			// Create edge table.
-			edgeTable := schema.NewEdgeTable(edgeTableName)
+			edgeTable := schema.NewEdgeTable(e.EdgeTableName())
+			edgeTable.SetAlias(fullName)
 			if len(e.Rel.Columns) == 0 {
 				return fmt.Errorf("polymorphic edge %s.%s has no columns", n.Name, e.Name)
 			}
@@ -981,6 +982,7 @@ func addPGEdgeElement(pg *schema.PropertyGraph, n *Type, e *Edge) error {
 
 	// Regular edges (non-polymorphic, non-edge-schema)
 	edgeTable := schema.NewEdgeTable(e.EdgeTableName())
+	edgeTable.SetAlias(e.EdgeTableAlias())
 	// TODO: Customize labels based on requirements
 	// edgeTable.AddLabel(schema.NewDefaultLabel().SetProperties(schema.NewAllProperties()))
 
