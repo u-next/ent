@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlhint"
 )
@@ -72,28 +73,83 @@ func (g *GraphQuery) Let(as ...*assignment) *GraphQuery {
 }
 
 // Return adds a RETURN statement to the linear query.
-func (g *GraphQuery) Return(items ...*Expression) *GraphQuery {
-	return g.Append(Return(items...))
+func (g *GraphQuery) Return(items ...string) *GraphQuery {
+	if len(g.stmts) == 0 {
+		return g.Append(Return(items...))
+	}
+	last := g.stmts[len(g.stmts)-1]
+	switch last := last.(type) {
+	case *ReturnBuilder:
+		last.AppendItem(items...)
+	default:
+		g.Append(Return(items...))
+	}
+	return g
 }
 
-// ReturnAll adds a RETURN ALL statement to the linear query.
-func (g *GraphQuery) ReturnAll(items ...*Expression) *GraphQuery {
-	return g.Append(ReturnAll(items...))
+// ReturnExpr adds a RETURN statement with expressions to the linear query.
+func (g *GraphQuery) ReturnExpr(exprs ...sql.Querier) *GraphQuery {
+	if len(g.stmts) == 0 {
+		return g.Append(ReturnExpr(exprs...))
+	}
+	last := g.stmts[len(g.stmts)-1]
+	switch last := last.(type) {
+	case *ReturnBuilder:
+		last.AppendItemExpr(exprs...)
+	default:
+		g.Append(ReturnExpr(exprs...))
+	}
+	return g
+}
+
+// ReturnExprAs adds a return expression with an alias to the last RETURN statement.
+func (g *GraphQuery) ReturnExprAs(expr sql.Querier, as string) *GraphQuery {
+	if len(g.stmts) == 0 {
+		return g.Append(Return().AppendItemExprAs(expr, as))
+	}
+	last := g.stmts[len(g.stmts)-1]
+	switch last := last.(type) {
+	case *ReturnBuilder:
+		last.AppendItemExprAs(expr, as)
+	default:
+		g.Append(Return().AppendItemExprAs(expr, as))
+	}
+	return g
+}
+
+// ReturnAs adds a return item with an alias to the last RETURN statement.
+func (g *GraphQuery) ReturnAs(it, as string) *GraphQuery {
+	if len(g.stmts) == 0 {
+		return g.Append(Return().AppendItemAs(it, as))
+	}
+	last := g.stmts[len(g.stmts)-1]
+	switch last := last.(type) {
+	case *ReturnBuilder:
+		last.AppendItemAs(it, as)
+	default:
+		g.Append(Return().AppendItemAs(it, as))
+	}
+	return g
 }
 
 // ReturnDistinct adds a RETURN DISTINCT statement to the linear query.
-func (g *GraphQuery) ReturnDistinct(items ...*Expression) *GraphQuery {
-	return g.Append(ReturnDistinct(items...))
+func (g *GraphQuery) ReturnDistinct(items ...string) *GraphQuery {
+	return g.Append(Return().ReturnDistinct(items...))
 }
 
 // GroupBy adds a GROUP BY clause to the last RETURN or WITH statement.
-func (g *GraphQuery) GroupBy(items ...*Expression) *GraphQuery {
+func (g *GraphQuery) GroupBy(items ...string) *GraphQuery {
 	return g.Append(GroupBy(items...))
 }
 
-// OrderBy adds an ORDER BY statement to the linear query.
-func (g *GraphQuery) OrderBy(obs ...orderExpr) *GraphQuery {
-	return g.Append(OrderBy(obs...))
+// OrderBy adds an ORDER BY clause to the last RETURN statement or the linear query.
+func (g *GraphQuery) OrderBy(columns ...string) *GraphQuery {
+	return g.Append(OrderBy(columns...))
+}
+
+// OrderByExpr adds the `ORDER BY` clause to the last RETURN statement or the linear query.
+func (g *GraphQuery) OrderByExpr(exprs ...sql.Querier) *GraphQuery {
+	return g.Append(OrderByExpr(exprs...))
 }
 
 // Limit adds a LIMIT statement to the linear query.
@@ -112,17 +168,17 @@ func (g *GraphQuery) Skip(count int64) *GraphQuery {
 }
 
 // With adds a WITH statement to the linear query.
-func (g *GraphQuery) With(items ...*Expression) *GraphQuery {
+func (g *GraphQuery) With(items ...string) *GraphQuery {
 	return g.Append(With(items...))
 }
 
 // WithAll adds a WITH ALL statement to the linear query.
-func (g *GraphQuery) WithAll(items ...*Expression) *GraphQuery {
+func (g *GraphQuery) WithAll(items ...string) *GraphQuery {
 	return g.Append(WithAll(items...))
 }
 
 // WithDistinct adds a WITH DISTINCT statement to the linear query.
-func (g *GraphQuery) WithDistinct(items ...*Expression) *GraphQuery {
+func (g *GraphQuery) WithDistinct(items ...string) *GraphQuery {
 	return g.Append(WithDistinct(items...))
 }
 
@@ -269,51 +325,18 @@ func (f *FilterBuilder) Query() (string, []any) {
 
 func (f *FilterBuilder) stmt() {}
 
-type orderExpr func(*sql.Builder)
-
-func OrderByExpr(expr *Expression) orderExpr {
-	return func(b *sql.Builder) {
-		b.Join(expr)
-	}
-}
-
-// Collate adds a COLLATE specification to the column expression.
-func (o orderExpr) Collate(collate string) orderExpr {
-	return func(b *sql.Builder) {
-		o(b)
-		b.WriteString(" COLLATE ")
-		b.WriteString(collate)
-	}
-}
-
-// Asc sets the order to ascending (default).
-func (c orderExpr) Asc() orderExpr {
-	return func(b *sql.Builder) {
-		c(b)
-		b.WriteString(" ASC")
-	}
-}
-
-// Desc sets the order to descending.
-func (c orderExpr) Desc() orderExpr {
-	return func(b *sql.Builder) {
-		c(b)
-		b.WriteString(" DESC")
-	}
-}
-
-func (o orderExpr) Query() (string, []any) {
-	var b sql.Builder
-	o(&b)
-	return b.String(), b.GetArgs()
+// item represents a column or an expression item.
+type item struct {
+	x  sql.Querier
+	c  string
+	as string
 }
 
 // ReturnBuilder is a builder for RETURN statements.
 type ReturnBuilder struct {
 	sql.Builder
-	all      bool
 	distinct bool
-	items    []sql.Querier
+	items    []item
 	groupBy  []sql.Querier
 	orderBy  []sql.Querier
 	limit    int64
@@ -321,25 +344,64 @@ type ReturnBuilder struct {
 }
 
 // Return creates a new RETURN statement builder.
-func Return(items ...*Expression) *ReturnBuilder {
-	return (&ReturnBuilder{}).Append(items...)
+func Return(items ...string) *ReturnBuilder {
+	return (&ReturnBuilder{}).Return(items...)
 }
 
-// ReturnAll creates a new RETURN ALL statement builder.
-func ReturnAll(items ...*Expression) *ReturnBuilder {
-	return (&ReturnBuilder{all: true, distinct: false}).Append(items...)
+// ReturnExpr creates a new RETURN statement builder with expressions.
+func ReturnExpr(exprs ...sql.Querier) *ReturnBuilder {
+	return (&ReturnBuilder{}).ReturnExpr(exprs...)
 }
 
-// ReturnDistinct creates a new RETURN DISTINCT statement builder.
-func ReturnDistinct(items ...*Expression) *ReturnBuilder {
-	return (&ReturnBuilder{all: false, distinct: true}).Append(items...)
-}
-
-// Append adds more return items to the RETURN statement.
-func (r *ReturnBuilder) Append(items ...*Expression) *ReturnBuilder {
-	for _, column := range items {
-		r.items = append(r.items, column)
+// Return changes the return items to the given columns.
+// If no items are given, it defaults to returning all columns (*).
+func (r *ReturnBuilder) Return(items ...string) *ReturnBuilder {
+	r.items = make([]item, len(items))
+	for i := range items {
+		r.items[i] = item{c: items[i]}
 	}
+	return r
+}
+
+// ReturnDistinct returns distinct items.
+func (r *ReturnBuilder) ReturnDistinct(items ...string) *ReturnBuilder {
+	return r.Return(items...).Distinct()
+}
+
+// AppendItem adds more return items to the RETURN statement.
+func (r *ReturnBuilder) AppendItem(items ...string) *ReturnBuilder {
+	for i := range items {
+		r.items = append(r.items, item{c: items[i]})
+	}
+	return r
+}
+
+// AppendItemAs adds a return item to the RETURN statement with the given alias.
+func (r *ReturnBuilder) AppendItemAs(it, as string) *ReturnBuilder {
+	r.items = append(r.items, item{c: it, as: as})
+	return r
+}
+
+// ReturnExpr adds a return expression to the RETURN statement.
+func (r *ReturnBuilder) ReturnExpr(expr ...sql.Querier) *ReturnBuilder {
+	r.items = make([]item, len(expr))
+	for i := range expr {
+		r.items[i] = item{x: expr[i]}
+	}
+	return r
+}
+
+// AppendItemExpr adds more return expressions to the RETURN statement.
+func (r *ReturnBuilder) AppendItemExpr(exprs ...sql.Querier) *ReturnBuilder {
+	for _, expr := range exprs {
+		r.items = append(r.items, item{x: expr})
+	}
+	return r
+}
+
+// AppendItemExprAs adds a return expression to the RETURN statement with the given alias.
+func (r *ReturnBuilder) AppendItemExprAs(expr sql.Querier, as string) *ReturnBuilder {
+	r.items = append(r.items, item{x: expr, as: as})
 	return r
 }
 
@@ -352,6 +414,18 @@ func (r *ReturnBuilder) GroupBy(exprs ...sql.Querier) *ReturnBuilder {
 // OrderBy adds an ORDER BY clause.
 func (r *ReturnBuilder) OrderBy(expr ...sql.Querier) *ReturnBuilder {
 	r.orderBy = append(r.orderBy, expr...)
+	return r
+}
+
+// Distinct adds the DISTINCT keyword to the `SELECT` statement.
+func (r *ReturnBuilder) Distinct() *ReturnBuilder {
+	r.distinct = true
+	return r
+}
+
+// SetDistinct sets the DISTINCT keyword to the `SELECT` statement.
+func (r *ReturnBuilder) SetDistinct(v bool) *ReturnBuilder {
+	r.distinct = v
 	return r
 }
 
@@ -369,15 +443,29 @@ func (r *ReturnBuilder) Offset(count int64) *ReturnBuilder {
 
 // Query returns the RETURN statement representation.
 func (r *ReturnBuilder) Query() (string, []any) {
+	r.SetDialect(dialect.Spanner)
 	r.WriteString("RETURN")
-	if r.all {
-		r.WriteString(" ALL")
-	} else if r.distinct {
+	if r.distinct {
 		r.WriteString(" DISTINCT")
 	}
-	if len(r.items) > 0 {
+	if len(r.items) == 0 {
+		r.WriteString(" *")
+	} else if len(r.items) > 0 {
 		r.Pad()
-		r.JoinComma(r.items...)
+		for i, item := range r.items {
+			if i > 0 {
+				r.Comma()
+			}
+			if item.x != nil {
+				r.Join(item.x)
+			} else {
+				r.WriteString(item.c)
+			}
+			if item.as != "" {
+				r.WriteString(" AS ")
+				r.Ident(item.as)
+			}
+		}
 	}
 	if len(r.groupBy) > 0 {
 		r.NewLine()
@@ -406,13 +494,12 @@ func (r *ReturnBuilder) stmt() {}
 
 // assignment represents a variable assignment in a LET statement.
 type assignment struct {
-	sql.Builder
 	variable string
-	value    *Expression
+	value    sql.Querier
 }
 
 // Assign creates a new assignment expression.
-func Assign(name string, value *Expression) *assignment {
+func Assign(name string, value sql.Querier) *assignment {
 	return &assignment{
 		variable: name,
 		value:    value,
@@ -426,33 +513,30 @@ func (a *assignment) Var(name string) *assignment {
 }
 
 // Value sets the expression to assign.
-func (a *assignment) Value(value *Expression) *assignment {
+func (a *assignment) Value(value sql.Querier) *assignment {
 	a.value = value
 	return a
 }
 
 // F returns the field access expression for the assigned variable.
-func (a *assignment) F(fields ...string) *Expression {
+func (a *assignment) F(fields ...string) string {
 	var b sql.Builder
 	b.Ident(a.variable)
 	for _, f := range fields {
-		b.WriteByte('.')
-		b.Ident(f)
+		if strings.HasPrefix(f, "[") && strings.HasSuffix(f, "]") {
+			b.WriteString(f)
+		} else {
+			b.WriteByte('.')
+			b.Ident(f)
+		}
 	}
-	return Expr(b.String())
-}
-
-func (a *assignment) Query() (string, []any) {
-	a.Ident(a.variable)
-	a.WriteString(" = ")
-	a.Join(a.value)
-	return a.String(), a.GetArgs()
+	return b.String()
 }
 
 // LetBuilder is a builder for LET statements.
 type LetBuilder struct {
 	sql.Builder
-	assignments []sql.Querier
+	assignments []*assignment
 }
 
 // Let creates a new LET statement builder.
@@ -461,7 +545,7 @@ func Let() *LetBuilder {
 }
 
 // Assign adds a new assignment to the LET statement.
-func (let *LetBuilder) Assign(name string, value *Expression) *LetBuilder {
+func (let *LetBuilder) Assign(name string, value sql.Querier) *LetBuilder {
 	let.assignments = append(let.assignments, Assign(name, value))
 	return let
 }
@@ -479,7 +563,14 @@ func (l *LetBuilder) Query() (string, []any) {
 	l.WriteString("LET")
 	if len(l.assignments) > 0 {
 		l.Pad()
-		l.JoinComma(l.assignments...)
+		for i, a := range l.assignments {
+			if i > 0 {
+				l.Comma()
+			}
+			l.Ident(a.variable)
+			l.WriteString(" = ")
+			l.Join(a.value)
+		}
 	}
 	return l.String(), l.GetArgs()
 }
@@ -489,18 +580,18 @@ func (l *LetBuilder) stmt() {}
 // GroupByBuilder is a builder for GROUP BY statements.
 type GroupByBuilder struct {
 	sql.Builder
-	exprs []sql.Querier
+	items []string
 }
 
 // GroupBy creates a new GROUP BY statement builder.
-func GroupBy(items ...*Expression) *GroupByBuilder {
+func GroupBy(items ...string) *GroupByBuilder {
 	return (&GroupByBuilder{}).Append(items...)
 }
 
 // Append adds more expressions to the GROUP BY statement.
-func (g *GroupByBuilder) Append(items ...*Expression) *GroupByBuilder {
+func (g *GroupByBuilder) Append(items ...string) *GroupByBuilder {
 	for _, item := range items {
-		g.exprs = append(g.exprs, item)
+		g.items = append(g.items, item)
 	}
 	return g
 }
@@ -508,9 +599,9 @@ func (g *GroupByBuilder) Append(items ...*Expression) *GroupByBuilder {
 // Query returns the GROUP BY statement representation.
 func (g *GroupByBuilder) Query() (string, []any) {
 	g.WriteString("GROUP BY")
-	if len(g.exprs) > 0 {
+	if len(g.items) > 0 {
 		g.Pad()
-		g.JoinComma(g.exprs...)
+		g.WriteString(strings.Join(g.items, ", "))
 	}
 	return g.String(), g.GetArgs()
 }
@@ -520,18 +611,49 @@ func (g *GroupByBuilder) stmt() {}
 // OrderByBuilder is a builder for ORDER BY statements.
 type OrderByBuilder struct {
 	sql.Builder
-	orders []sql.Querier
+	orders []any
 }
 
 // OrderBy creates a new ORDER BY statement builder.
-func OrderBy(items ...orderExpr) *OrderByBuilder {
-	return (&OrderByBuilder{}).Append(items...)
+func OrderBy(columns ...string) *OrderByBuilder {
+	return (&OrderByBuilder{}).OrderBy(columns...)
 }
 
-// Asc adds an ascending order expression.
-func (o *OrderByBuilder) Append(orders ...orderExpr) *OrderByBuilder {
-	for _, order := range orders {
-		o.orders = append(o.orders, order)
+// OrderByExpr creates a new ORDER BY statement builder with expressions.
+func OrderByExpr(exprs ...sql.Querier) *OrderByBuilder {
+	return (&OrderByBuilder{}).OrderByExpr(exprs...)
+}
+
+// OrderBy changes the order expressions to the given columns.
+func (o *OrderByBuilder) OrderBy(columns ...string) *OrderByBuilder {
+	o.orders = make([]any, len(columns))
+	for i := range columns {
+		o.orders[i] = columns[i]
+	}
+	return o
+}
+
+// OrderByExpr changes the order expressions to the given expressions.
+func (o *OrderByBuilder) OrderByExpr(exprs ...sql.Querier) *OrderByBuilder {
+	o.orders = make([]any, len(exprs))
+	for i := range exprs {
+		o.orders[i] = exprs[i]
+	}
+	return o
+}
+
+// AppendExpr adds more order expressions to the ORDER BY statement.
+func (o *OrderByBuilder) AppendExpr(expr ...sql.Querier) *OrderByBuilder {
+	for i := range expr {
+		o.orders = append(o.orders, expr[i])
+	}
+	return o
+}
+
+// AppendName adds more order columns to the ORDER BY statement.
+func (o *OrderByBuilder) AppendName(columns ...string) *OrderByBuilder {
+	for i := range columns {
+		o.orders = append(o.orders, columns[i])
 	}
 	return o
 }
@@ -541,7 +663,17 @@ func (o *OrderByBuilder) Query() (string, []any) {
 	o.WriteString("ORDER BY")
 	if len(o.orders) > 0 {
 		o.Pad()
-		o.JoinComma(o.orders...)
+		for i, order := range o.orders {
+			if i > 0 {
+				o.Comma()
+			}
+			switch order := order.(type) {
+			case string:
+				o.Ident(order)
+			case sql.Querier:
+				o.Join(order)
+			}
+		}
 	}
 	return o.String(), o.GetArgs()
 }
@@ -670,16 +802,16 @@ func (f *ForBuilder) Query() (string, []any) {
 }
 
 // Elem returns the element variable name.
-func (f *ForBuilder) Elem() *Expression {
-	return Expr(fmt.Sprintf("`%s`", f.element))
+func (f *ForBuilder) Elem() string {
+	return fmt.Sprintf("`%s`", f.element)
 }
 
 // Offset returns the offset variable name.
-func (f *ForBuilder) Offset() *Expression {
+func (f *ForBuilder) Offset() string {
 	if f.offset == "" {
 		f.offset = "offset"
 	}
-	return Expr(fmt.Sprintf("`%s`", f.offset))
+	return fmt.Sprintf("`%s`", f.offset)
 }
 
 func (f *ForBuilder) stmt() {}
@@ -709,27 +841,27 @@ type WithBuilder struct {
 	sql.Builder
 	all      bool
 	distinct bool
-	items    []sql.Querier
+	items    []string
 	groupBy  []sql.Querier
 }
 
 // With creates a new WITH statement builder.
-func With(items ...*Expression) *WithBuilder {
+func With(items ...string) *WithBuilder {
 	return (&WithBuilder{}).Append(items...)
 }
 
 // WithAll creates a new WITH ALL statement builder.
-func WithAll(items ...*Expression) *WithBuilder {
+func WithAll(items ...string) *WithBuilder {
 	return (&WithBuilder{all: true, distinct: false}).Append(items...)
 }
 
 // WithDistinct creates a new WITH DISTINCT statement builder.
-func WithDistinct(items ...*Expression) *WithBuilder {
+func WithDistinct(items ...string) *WithBuilder {
 	return (&WithBuilder{all: false, distinct: true}).Append(items...)
 }
 
 // Append adds more return items to the WITH statement.
-func (w *WithBuilder) Append(items ...*Expression) *WithBuilder {
+func (w *WithBuilder) Append(items ...string) *WithBuilder {
 	for _, item := range items {
 		w.items = append(w.items, item)
 	}
@@ -752,7 +884,7 @@ func (w *WithBuilder) Query() (string, []any) {
 	}
 	if len(w.items) > 0 {
 		w.Pad()
-		w.JoinComma(w.items...)
+		w.WriteString(strings.Join(w.items, ", "))
 	}
 	if len(w.groupBy) > 0 {
 		w.NewLine()
@@ -984,7 +1116,7 @@ func isAlias(s string) bool {
 }
 
 // Concat concatenates two path patterns with the || operator.
-func Concat(p, q *PathPattern) *Expression {
+func Concat(p, q *PathPattern) sql.Querier {
 	var b sql.Builder
 	if p.variable != "" {
 		b.Ident(p.variable)
@@ -1001,7 +1133,7 @@ func Concat(p, q *PathPattern) *Expression {
 			b.Join(q)
 		})
 	}
-	return Expr(b.String(), b.GetArgs()...)
+	return sql.Expr(b.String(), b.GetArgs()...)
 }
 
 type GraphPatternBuilder struct {
@@ -1217,7 +1349,7 @@ type NodePattern struct {
 // N creates a new node pattern builder.
 func N() *NodePattern {
 	return &NodePattern{
-		filler: &patternFiller{properties: make(map[string]*Expression)},
+		filler: &patternFiller{properties: make(map[string]sql.Querier)},
 	}
 }
 
@@ -1244,13 +1376,13 @@ func (n *NodePattern) LabelExpr(expr *labelExpr) *NodePattern {
 }
 
 // Property adds a property filter.
-func (n *NodePattern) Property(key string, expr *Expression) *NodePattern {
+func (n *NodePattern) Property(key string, expr sql.Querier) *NodePattern {
 	n.filler.properties[key] = expr
 	return n
 }
 
 // Properties adds multiple property filters.
-func (n *NodePattern) Properties(props map[string]*Expression) *NodePattern {
+func (n *NodePattern) Properties(props map[string]sql.Querier) *NodePattern {
 	maps.Copy(n.filler.properties, props)
 	return n
 }
@@ -1262,7 +1394,7 @@ func (n *NodePattern) Where(condition *sql.Predicate) *NodePattern {
 }
 
 // F returns the field access expression for the node variable.
-func (n *NodePattern) F(fields ...string) *Expression {
+func (n *NodePattern) F(fields ...string) string {
 	var b sql.Builder
 	if n.filler.variable != "" {
 		b.Ident(n.filler.variable)
@@ -1270,7 +1402,7 @@ func (n *NodePattern) F(fields ...string) *Expression {
 	for _, field := range fields {
 		b.WriteByte('.').Ident(field)
 	}
-	return Expr(b.String())
+	return b.String()
 }
 
 // L returns a label expression for the node pattern.
@@ -1310,7 +1442,7 @@ type EdgePattern struct {
 func E() *EdgePattern {
 	return &EdgePattern{
 		direction: EdgeAnyDirection,
-		filler:    &patternFiller{properties: make(map[string]*Expression)},
+		filler:    &patternFiller{properties: make(map[string]sql.Querier)},
 	}
 }
 
@@ -1355,13 +1487,13 @@ func (e *EdgePattern) LabelExpr(expr *labelExpr) *EdgePattern {
 }
 
 // Property adds a property filter.
-func (e *EdgePattern) Property(key string, value *Expression) *EdgePattern {
+func (e *EdgePattern) Property(key string, value sql.Querier) *EdgePattern {
 	e.filler.properties[key] = value
 	return e
 }
 
 // Properties adds multiple property filters.
-func (e *EdgePattern) Properties(props map[string]*Expression) *EdgePattern {
+func (e *EdgePattern) Properties(props map[string]sql.Querier) *EdgePattern {
 	maps.Copy(e.filler.properties, props)
 	return e
 }
@@ -1379,7 +1511,7 @@ func (e *EdgePattern) Abbreviated() *EdgePattern {
 }
 
 // F returns the field access expression for the edge variable.
-func (e *EdgePattern) F(fields ...string) *Expression {
+func (e *EdgePattern) F(fields ...string) string {
 	var b sql.Builder
 	if e.filler.variable != "" {
 		b.Ident(e.filler.variable)
@@ -1387,7 +1519,7 @@ func (e *EdgePattern) F(fields ...string) *Expression {
 	for _, field := range fields {
 		b.WriteByte('.').Ident(field)
 	}
-	return Expr(b.String())
+	return b.String()
 }
 
 // Query returns the edge pattern representation.
@@ -1415,7 +1547,7 @@ type patternFiller struct {
 	sql.Builder
 	variable   string
 	labelExpr  *labelExpr
-	properties map[string]*Expression
+	properties map[string]sql.Querier
 	where      *sql.Predicate
 }
 
@@ -1673,12 +1805,7 @@ func AllDifferent(elements ...string) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
 		b.WriteString("ALL_DIFFERENT")
 		b.Wrap(func(b *sql.Builder) {
-			for i, element := range elements {
-				if i > 0 {
-					b.Comma()
-				}
-				b.WriteString(element)
-			}
+			b.WriteString(strings.Join(elements, ", "))
 		})
 	})
 }
@@ -1688,12 +1815,7 @@ func Same(elements ...string) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
 		b.WriteString("SAME")
 		b.Wrap(func(b *sql.Builder) {
-			for i, element := range elements {
-				if i > 0 {
-					b.Comma()
-				}
-				b.WriteString(element)
-			}
+			b.WriteString(strings.Join(elements, ", "))
 		})
 	})
 }
@@ -1709,121 +1831,130 @@ func PropertyExists(element, property string) *sql.Predicate {
 	})
 }
 
-// DestinationNodeID returns a new DESTINATION_NODE_ID function builder.
-func DestinationNodeID(edge *Expression) *sql.Func {
-	var fn sql.Func
-	fn.ByExpr("DESTINATION_NODE_ID", edge)
-	return &fn
-}
-
-// Edges returns a new EDGES function builder.
-func Edges(path *Expression) *sql.Func {
-	var fn sql.Func
-	fn.ByExpr("EDGES", path)
-	return &fn
-}
-
-// ElementID returns a new ELEMENT_ID function builder.
-func ElementID(element *Expression) *sql.Func {
-	var fn sql.Func
-	fn.ByExpr("ELEMENT_ID", element)
-	return &fn
-}
-
-// IsAcyclic returns a new IS_ACYCLIC function builder.
-func IsAcyclic(path *Expression) *sql.Func {
-	var fn sql.Func
-	fn.ByExpr("IS_ACYCLIC", path)
-	return &fn
-}
-
-// IsSimple returns a new IS_SIMPLE function builder.
-func IsSimple(path *Expression) *sql.Func {
-	var fn sql.Func
-	fn.ByExpr("IS_SIMPLE", path)
-	return &fn
-}
-
-// IsTrail returns a new IS_TRAIL function builder.
-func IsTrail(path *Expression) *sql.Func {
-	var fn sql.Func
-	fn.ByExpr("IS_TRAIL", path)
-	return &fn
-}
-
-// LabelsFunc returns a new LABELS function builder.
-func LabelsFunc(element *Expression) *sql.Func {
-	var fn sql.Func
-	fn.ByExpr("LABELS", element)
-	return &fn
-}
-
-// Nodes returns a new NODES function builder.
-func Nodes(path *Expression) *sql.Func {
-	var fn sql.Func
-	fn.ByExpr("NODES", path)
-	return &fn
-}
-
-// PathFunc returns a new PATH function builder.
-func PathFunc(elements ...*Expression) *sql.Func {
-	var fn sql.Func
-	args := make([]sql.Querier, len(elements))
-	for i, e := range elements {
-		args[i] = e
+// DestinationNodeID returns a new DESTINATION_NODE_ID function.
+func DestinationNodeID(edge string) func(*sql.Builder) {
+	return func(b *sql.Builder) {
+		b.WriteString("DESTINATION_NODE_ID(")
+		b.WriteString(edge)
+		b.WriteByte(')')
 	}
-	fn.ByExpr("PATH", args...)
-	return &fn
 }
 
-// PathFirst returns a new PATH_FIRST function builder.
-func PathFirst(path *Expression) *sql.Func {
-	var fn sql.Func
-	fn.ByExpr("PATH_FIRST", path)
-	return &fn
+// Edges returns a new EDGES function.
+func Edges(path string) func(*sql.Builder) {
+	return func(b *sql.Builder) {
+		b.WriteString("EDGES(")
+		b.WriteString(path)
+		b.WriteByte(')')
+	}
+}
+
+// ElementID returns a new ELEMENT_ID function.
+func ElementID(element string) func(*sql.Builder) {
+	return func(b *sql.Builder) {
+		b.WriteString("ELEMENT_ID(")
+		b.WriteString(element)
+		b.WriteByte(')')
+	}
+}
+
+// IsAcyclic returns a new IS_ACYCLIC function.
+func IsAcyclic(path string) func(*sql.Builder) {
+	return func(b *sql.Builder) {
+		b.WriteString("IS_ACYCLIC(")
+		b.WriteString(path)
+		b.WriteByte(')')
+	}
+}
+
+// IsSimple returns a new IS_SIMPLE function.
+func IsSimple(path string) func(*sql.Builder) {
+	return func(b *sql.Builder) {
+		b.WriteString("IS_SIMPLE(")
+		b.WriteString(path)
+		b.WriteByte(')')
+	}
+}
+
+// IsTrail returns a new IS_TRAIL function.
+func IsTrail(path string) func(*sql.Builder) {
+	return func(b *sql.Builder) {
+		b.WriteString("IS_TRAIL(")
+		b.WriteString(path)
+		b.WriteByte(')')
+	}
+}
+
+// LabelsFunc returns a new LABELS function.
+func LabelsFunc(element string) func(*sql.Builder) {
+	return func(b *sql.Builder) {
+		b.WriteString("LABELS(")
+		b.WriteString(element)
+		b.WriteByte(')')
+	}
+}
+
+// Nodes returns a new NODES function.
+func Nodes(path string) func(*sql.Builder) {
+	return func(b *sql.Builder) {
+		b.WriteString("NODES(")
+		b.WriteString(path)
+		b.WriteByte(')')
+	}
+}
+
+// Paths returns a new PATH function.
+func Paths(elements ...string) func(*sql.Builder) {
+	return func(b *sql.Builder) {
+		b.WriteString("PATH(")
+		b.WriteString(strings.Join(elements, ", "))
+		b.WriteByte(')')
+	}
+}
+
+// PathFirst returns a new PATH_FIRST function.
+func PathFirst(path string) func(*sql.Builder) {
+	return func(b *sql.Builder) {
+		b.WriteString("PATH_FIRST(")
+		b.WriteString(path)
+		b.WriteByte(')')
+	}
 }
 
 // PathLast returns a new PATH_LAST function builder.
-func PathLast(path *Expression) *sql.Func {
-	var fn sql.Func
-	fn.ByExpr("PATH_LAST", path)
-	return &fn
+func PathLast(path string) func(*sql.Builder) {
+	return func(b *sql.Builder) {
+		b.WriteString("PATH_LAST(")
+		b.WriteString(path)
+		b.WriteByte(')')
+	}
 }
 
 // PathLength returns a new PATH_LENGTH function builder.
-func PathLength(path *Expression) *sql.Func {
-	var fn sql.Func
-	fn.ByExpr("PATH_LENGTH", path)
-	return &fn
+func PathLength(path string) func(*sql.Builder) {
+	return func(b *sql.Builder) {
+		b.WriteString("PATH_LENGTH(")
+		b.WriteString(path)
+		b.WriteByte(')')
+	}
 }
 
 // PropertyNames returns a new PROPERTY_NAMES function builder.
-func PropertyNames(element *Expression) *sql.Func {
-	var fn sql.Func
-	fn.ByExpr("PROPERTY_NAMES", element)
-	return &fn
+func PropertyNames(element string) func(*sql.Builder) {
+	return func(b *sql.Builder) {
+		b.WriteString("PROPERTY_NAMES(")
+		b.WriteString(element)
+		b.WriteByte(')')
+	}
 }
 
 // SourceNodeID returns a new SOURCE_NODE_ID function builder.
-func SourceNodeID(edge *Expression) *sql.Func {
-	var fn sql.Func
-	fn.ByExpr("SOURCE_NODE_ID", edge)
-	return &fn
-}
-
-// ToJSON marshals the given argument to a valid JSON document.
-// PathFunc returns a new PATH function builder.
-func ToJSON(val *Expression) *sql.Func {
-	var fn sql.Func
-	fn.ByExpr("TO_JSON", val)
-	return &fn
-}
-
-// JSONQuery returns a new JSON_QUERY function builder.
-func JSONQuery(val *Expression, path string) *sql.Func {
-	var fn sql.Func
-	fn.ByExpr("JSON_QUERY", val, sql.Raw(path))
-	return &fn
+func SourceNodeID(edge string) func(*sql.Builder) {
+	return func(b *sql.Builder) {
+		b.WriteString("SOURCE_NODE_ID(")
+		b.WriteString(edge)
+		b.WriteByte(')')
+	}
 }
 
 // ArrayQuery returns an ARRAY expression for the given subquery.
@@ -1848,85 +1979,4 @@ func ValueQuery(expr *GraphQuery) sql.Querier {
 			b.Dedent().NewLine()
 		})
 	})
-}
-
-// Expr returns an SQL expression that implements the Querier interface.
-func Expr(expr string, args ...any) *Expression {
-	return &Expression{s: expr, args: args}
-}
-
-// VExpr returns a value SQL expression that implements the Querier interface.
-func VExpr(v any) *Expression {
-	return Expr("?", v)
-}
-
-// BExpr returns an boolean SQL expression that implements the Querier interface.
-func BExpr(pred *sql.Predicate) *Expression {
-	expr, args := pred.Query()
-	return Expr(expr, args...)
-}
-
-// PExpr returns an pattern SQL expression that implements the Querier interface.
-func PExpr(p Pattern) *Expression {
-	expr, args := p.Query()
-	return Expr(expr, args...)
-}
-
-// FExpr returns an function SQL expression that implements the Querier interface.
-func FExpr(fn *sql.Func) *Expression {
-	expr, args := fn.Query()
-	return Expr(expr, args...)
-}
-
-type Expression struct {
-	s    string
-	args []any
-	as   string
-}
-
-func (e *Expression) As(alias string) *Expression {
-	e.as = alias
-	return e
-}
-
-func (e *Expression) F(fields ...string) *Expression {
-	var b sql.Builder
-	if e.as != "" {
-		b.Ident(e.as)
-	} else {
-		b.WriteString(e.s)
-	}
-	for _, field := range fields {
-		b.WriteByte('.').Ident(field)
-	}
-	return Expr(b.String())
-}
-
-// I returns the indexed access expression for the given index.
-func (e *Expression) I(i int) *Expression {
-	var b sql.Builder
-	if e.as != "" {
-		b.Ident(e.as)
-	} else {
-		b.WriteString(e.s)
-	}
-	b.WriteByte('[')
-	b.WriteString(strconv.Itoa(i))
-	b.WriteByte(']')
-	return Expr(b.String())
-}
-
-func (e *Expression) String() string {
-	s, _ := e.Query()
-	return s
-}
-
-func (e *Expression) Query() (string, []any) {
-	var b sql.Builder
-	b.WriteString(e.s)
-	if e.as != "" {
-		b.WriteString(" AS ")
-		b.Ident(e.as)
-	}
-	return b.String(), e.args
 }

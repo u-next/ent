@@ -1511,19 +1511,6 @@ func (f *Func) Avg(ident string) {
 	f.ByName("AVG", ident)
 }
 
-// TODO: move to conditional expressions
-// Coalesce wraps the ident with the COALESCE function.
-func Coalesce(exprs ...Querier) string {
-	f := ExprFunc(func(b *Builder) {
-		b.WriteString("COALESCE")
-		b.Wrap(func(b *Builder) {
-			b.JoinComma(exprs...)
-		})
-	})
-	q, _ := f.Query()
-	return q
-}
-
 // ByName wraps an identifier with a function name.
 func (f *Func) ByName(fn string, ident ...string) {
 	f.Append(func(b *Builder) {
@@ -1849,6 +1836,7 @@ func (s *Selector) AppendSelectExprAs(expr Querier, as string) *Selector {
 	return s
 }
 
+// AsStruct sets the selector type to STRUCT.
 func (s *Selector) AsStruct() *Selector {
 	if !s.Spanner() {
 		s.AddError(fmt.Errorf("AS STRUCT is only supported by GoogleSQL family dialects"))
@@ -1858,6 +1846,7 @@ func (s *Selector) AsStruct() *Selector {
 	return s
 }
 
+// AsValue sets the selector type to VALUE.
 func (s *Selector) AsValue() *Selector {
 	if !s.Spanner() {
 		s.AddError(fmt.Errorf("AS VALUE is only supported by GoogleSQL family dialects"))
@@ -1867,6 +1856,7 @@ func (s *Selector) AsValue() *Selector {
 	return s
 }
 
+// AsType sets the selector type to the given user-defined type.
 func (s *Selector) AsType(typ string) *Selector {
 	if !s.Spanner() {
 		s.AddError(fmt.Errorf("AS TYPE is only supported by GoogleSQL family dialects"))

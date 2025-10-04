@@ -1,12 +1,12 @@
 package sqlpgq
 
 import (
-	"fmt"
 	"strconv"
 	"testing"
 
 	"entgo.io/ent/dialect/sql"
 	"entgo.io/ent/dialect/sql/sqlhint"
+	"entgo.io/ent/dialect/sql/sqljson"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,31 +20,26 @@ func TestBuilder(t *testing.T) {
 			input: func() *GraphQuery {
 				account := N().Named("account").Labels("Account")
 				owner := N().Named("owner").Labels("Person")
-				numIncomingTransfers := Expr(sql.Count("*")).As("num_incoming_transfers")
 				return Graph("FinGraph").
 					Match(
 						From(N().Labels("Account")).Via(E().Labels("Transfers").RightDirection()).To(account),
 					).
 					Return(
 						account.F(),
-						numIncomingTransfers,
+						sql.As(sql.Count("`*`"), "num_incoming_transfers"),
 					).
-					GroupBy(
-						account.F(),
-					).
+					GroupBy(account.F()).
 					Next().
 					Match(
 						To(account).Via(E().Labels("Owns").LeftDirection()).From(owner),
 					).
-					Return(
-						account.F("id").As("account_id"),
-						owner.F("name").As("owner_name"),
-						numIncomingTransfers.F(),
-					)
+					ReturnAs(account.F("id"), "account_id").
+					ReturnAs(owner.F("name"), "owner_name").
+					Return("`num_incoming_transfers`")
 			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
 				"MATCH (:`Account`)-[:`Transfers`]->(`account`:`Account`)\n" +
-				"RETURN `account`, COUNT(*) AS `num_incoming_transfers`\n" +
+				"RETURN `account`, COUNT(`*`) AS `num_incoming_transfers`\n" +
 				"GROUP BY `account`\n\n" +
 				"NEXT\n\n" +
 				"MATCH (`account`:`Account`)<-[:`Owns`]-(`owner`:`Person`)\n" +
@@ -60,12 +55,10 @@ func TestBuilder(t *testing.T) {
 						From(p).Via(o.RightDirection()).To(a),
 					).
 					Filter(
-						sql.NEQ(p.F("Id").String(), "1"),
+						sql.NEQ(p.F("Id"), "1"),
 					).
-					Return(
-						p.F("name"),
-						a.F("Id").As("account_id"),
-					)
+					Return(p.F("name")).
+					ReturnAs(a.F("Id"), "account_id")
 			}(),
 			wantArgs: []any{"1"},
 			wantQuery: "GRAPH `FinGraph`\n" +
@@ -78,21 +71,19 @@ func TestBuilder(t *testing.T) {
 				p := N().Named("p").Labels("Person")
 				a := N().Named("a").Labels("Account")
 				o := E().Named("o").Labels("Owns")
-				iter := Element("element").In(VExpr([]string{"all", "some"})).WithOffset()
+				iter := Element("element").In(sql.Expr("?", []string{"all", "some"})).WithOffset()
 				return Graph("FinGraph").
 					Match(
 						From(p).Via(o.RightDirection()).To(a),
 					).
 					For(iter).
-					Return(
-						p.F("Id"),
-						iter.Elem().As("alert_type"),
-						iter.Offset(),
-					).
+					Return(p.F("Id")).
+					ReturnAs(iter.Elem(), "alert_type").
+					Return(iter.Offset()).
 					OrderBy(
-						OrderByExpr(p.F("Id")),
-						OrderByExpr(iter.Elem()),
-						OrderByExpr(iter.Offset()),
+						p.F("Id"),
+						iter.Elem(),
+						iter.Offset(),
 					)
 			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
@@ -107,15 +98,13 @@ func TestBuilder(t *testing.T) {
 				source := N().Named("source").Labels("Account")
 				destination := N().Named("destination").Labels("Account")
 				e := E().Named("e").Labels("Transfers")
-				a := Assign("a", source.F())
+				a := Assign("a", sql.Expr(source.F()))
 				return Graph("FinGraph").
 					Match(
 						From(source).Via(e.RightDirection()).To(destination),
 					).
 					Let(a).
-					Return(
-						a.F("id").As("a_id"),
-					)
+					ReturnAs(a.F("id"), "a_id")
 			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
 				"MATCH (`source`:`Account`)-[`e`:`Transfers`]->(`destination`:`Account`)\n" +
@@ -132,7 +121,7 @@ func TestBuilder(t *testing.T) {
 						From(source).Via(e.RightDirection()).To(destination),
 					).
 					OrderBy(
-						OrderByExpr(source.F("Id")),
+						source.F("Id"),
 					).
 					Limit(3).
 					Return(
@@ -192,9 +181,7 @@ func TestBuilder(t *testing.T) {
 					WithDistinct(
 						dst.F(),
 					).
-					Return(
-						dst.F("id").As("destination_id"),
-					)
+					ReturnAs(dst.F("id"), "destination_id")
 			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
 				"MATCH (`src`:`Account`)-[`transfer`:`Transfers`]->(`dst`:`Account`)\n" +
@@ -206,28 +193,23 @@ func TestBuilder(t *testing.T) {
 				p := N().Named("p").Labels("Person")
 				return Graph("FinGraph").
 					Match(p).
-					Return(
-						p.F("name"),
-						VExpr(1).As("group_id"),
-					).
+					Return(p.F("name")).
+					ReturnAs("1", "group_id").
 					UnionAll().
 					Match(p).
-					Return(
-						VExpr(2).As("group_id"),
-						p.F("name"),
-					)
+					ReturnAs("2", "group_id").
+					Return(p.F("name"))
 			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
 				"MATCH (`p`:`Person`)\n" +
-				"RETURN `p`.`name`, ? AS `group_id`\n" +
+				"RETURN `p`.`name`, 1 AS `group_id`\n" +
 				"UNION ALL\n" +
 				"MATCH (`p`:`Person`)\n" +
-				"RETURN ? AS `group_id`, `p`.`name`",
-			wantArgs: []any{1, 2},
+				"RETURN 2 AS `group_id`, `p`.`name`",
 		},
 		{
 			input: func() *GraphQuery {
-				p := N().Named("p").Labels("Person").Property("id", VExpr(1))
+				p := N().Named("p").Labels("Person").Property("id", sql.Expr("?", 1))
 				a := N().Named("a").Labels("Account")
 				e := E().Named("e").Labels("Transfers")
 				oa := N().Named("oa").Labels("Account")
@@ -252,7 +234,7 @@ func TestBuilder(t *testing.T) {
 		{
 			input: func() *sql.Selector {
 				n := N().Named("n").Labels("Person")
-				return sql.SelectExpr(
+				return sql.Select(
 					n.F("name"),
 					n.F("id"),
 				).From(
@@ -295,7 +277,7 @@ func TestBuilder(t *testing.T) {
 				src := N().Named("src").Labels("Account")
 				dst := N().Named("dst").Labels("Account")
 				transfer := E().Labels("Transfers")
-				subpath := From(N().Labels("Account")).Via(transfer.RightDirection()).To(N().Named("mid").Labels("Account").Property("is_blocked", VExpr(true)))
+				subpath := From(N().Labels("Account")).Via(transfer.RightDirection()).To(N().Named("mid").Labels("Account").Property("is_blocked", sql.Expr("?", true)))
 				lower := 1
 				upper := 2
 				return Graph("FinGraph").
@@ -303,8 +285,8 @@ func TestBuilder(t *testing.T) {
 						From(src).Path(subpath.Bounded(&lower, &upper)).Via(transfer.RightDirection()).To(dst),
 					).
 					Return(
-						src.F("id").As("src_account_id"),
-						dst.F("id").As("dst_account_id"),
+						sql.As(src.F("id"), "src_account_id"),
+						sql.As(dst.F("id"), "dst_account_id"),
 					)
 			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
@@ -325,9 +307,7 @@ func TestBuilder(t *testing.T) {
 				return Graph("FinGraph").
 					Match(p, q).
 					Let(fullPath).
-					Return(
-						Expr(fmt.Sprintf("TO_JSON(%s)", fullPath.F())).As("results"),
-					)
+					ReturnAs("TO_JSON(`full_path`)", "results")
 			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
 				"MATCH `p` = (`src`:`Account`)-[`t1`:`Transfers`]->(`mid`:`Account`), `q` = (`mid`:`Account`)-[`t2`:`Transfers`]->(`dst`:`Account`)\n" +
@@ -336,16 +316,14 @@ func TestBuilder(t *testing.T) {
 		},
 		{
 			input: func() *GraphQuery {
-				p := N().Named("p").Labels("Person").Property("Name", VExpr("Lee"))
+				p := N().Named("p").Labels("Person").Property("Name", sql.Expr("?", "Lee"))
 				a := N().Named("a").Labels("Account")
 				o := E().Named("o").Labels("Owns")
 				match := Match(
 					From(p).Via(o.RightDirection()).To(a),
 				)
 				return Graph("FinGraph").
-					Return(
-						BExpr(ExistsQuery(match)).As("results"),
-					)
+					ReturnExprAs(ExistsQuery(match), "results")
 			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
 				"RETURN EXISTS {\n" +
@@ -360,17 +338,15 @@ func TestBuilder(t *testing.T) {
 				dst := N().Named("dst").Labels("Account")
 				t1 := E().Named("t1").Labels("Transfers")
 				t2 := E().Named("t2").Labels("Transfers")
-				p := Assign("p", FExpr(PathFunc(src.F(), t1.F(), mid.F(), t2.F(), dst.F())))
+				p := Assign("p", sql.ExprFunc(Paths(src.F(), t1.F(), mid.F(), t2.F(), dst.F())))
 				return Graph("FinGraph").
 					Match(
 						From(src).Via(t1.RightDirection()).To(mid).Via(t2.RightDirection()).To(dst),
 					).
 					Let(p).
-					Return(
-						FExpr(JSONQuery(FExpr(ToJSON(p.F())).I(0), "'$.labels'")).As("element_a"),
-						FExpr(JSONQuery(FExpr(ToJSON(p.F())).I(1), "'$.labels'")).As("element_b"),
-						FExpr(JSONQuery(FExpr(ToJSON(p.F())).I(2), "'$.labels'")).As("element_c"),
-					)
+					ReturnExprAs(sqljson.ValuePath("TO_JSON(`p`)[0]", sqljson.Path("labels")), "element_a").
+					ReturnExprAs(sqljson.ValuePath("TO_JSON(`p`)[1]", sqljson.Path("labels")), "element_b").
+					ReturnExprAs(sqljson.ValuePath("TO_JSON(`p`)[2]", sqljson.Path("labels")), "element_c")
 			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
 				"MATCH (`src`:`Account`)-[`t1`:`Transfers`]->(`mid`:`Account`)-[`t2`:`Transfers`]->(`dst`:`Account`)\n" +
