@@ -18,7 +18,6 @@ import (
 	"unicode/utf8"
 
 	"entgo.io/ent/schema"
-	"google.golang.org/protobuf/proto"
 )
 
 // String returns a new Field with type string.
@@ -164,33 +163,53 @@ func UUID(name string, typ driver.Valuer) *uuidBuilder {
 	return b
 }
 
-// TODO: add support for protobuf types
-// Proto returns a new Field with type protobuf message. An example for defining protobuf field is as follows:
+// Numeric returns a new Field with type numeric/decimal with the specified precision and scale.
+// An example for defining numeric field is as follows:
 //
-// field.Proto("order", &orderv1.Order{})
-func Proto(name string, typ proto.Message) *protoBuilder {
-	rt := reflect.TypeOf(typ)
-	b := &protoBuilder{&Descriptor{
-		Name: name,
-		Info: &TypeInfo{
-			Type:    TypeProto,
-			Ident:   string(typ.ProtoReflect().Descriptor().FullName()),
-			PkgPath: indirect(rt).PkgPath(),
-		},
+//	field.Numeric("price", 10, 2).
+//		Optional()
+func Numeric(name string, precision, scale int) *numericBuilder {
+	return &numericBuilder{&Descriptor{
+		Name:      name,
+		Info:      &TypeInfo{Type: TypeNumeric},
+		Precision: precision,
+		Scale:     scale,
 	}}
-	b.desc.goType(typ)
-	return b
 }
 
-// TODO: add support for array types
+// Array returns a new Field with type array of the specified element type.
+// The array field is database-agnostic and can be used with any supported dialect.
+// Use SchemaType() to specify dialect-specific array types.
+//
+// Examples:
+//
+//	// Generic array of strings
+//	field.Array("tags", []string{}).
+//		Optional()
+//
+//	// Array with dialect-specific schema types
+//	field.Array("singer_ids", []int64{}).
+//		SchemaType(map[string]string{
+//			dialect.Postgres:     "integer[]",
+//			dialect.MySQL:        "json",
+//			dialect.GoogleSpanner: "ARRAY<INT64>",
+//		})
+//
+//	// Array with vector length for Spanner (using Size field)
+//	field.Array("embeddings", []float32{}).
+//		Size(128).  // vector length
+//		SchemaType(map[string]string{
+//			dialect.GoogleSpanner: "ARRAY<FLOAT32>(vector_length=>128)",
+//		})
 func Array(name string, typ any) *arrayBuilder {
 	rt := reflect.TypeOf(typ)
 	b := &arrayBuilder{&Descriptor{
 		Name: name,
 		Info: &TypeInfo{
-			Type:    TypeArray,
-			Ident:   rt.String(),
-			PkgPath: indirect(rt).PkgPath(),
+			Type:     TypeArray,
+			Ident:    rt.String(),
+			PkgPath:  indirect(rt).PkgPath(),
+			Nillable: true,
 		},
 	}}
 	b.desc.goType(typ)
@@ -1317,14 +1336,134 @@ func (b *uuidBuilder) Descriptor() *Descriptor {
 	return b.desc
 }
 
-// protoBuilder is the builder for protobuf fields.
-type protoBuilder struct {
-	desc *Descriptor
-}
-
 // arrayBuilder is the builder for array fields.
 type arrayBuilder struct {
 	desc *Descriptor
+}
+
+// Size sets the size/length constraint for the array field.
+// This can be used for various purposes like vector length in Spanner
+// or array size limits in other databases.
+//
+//	field.Array("embeddings", []float32{}).
+//		Size(128)
+func (b *arrayBuilder) Size(size int) *arrayBuilder {
+	b.desc.Size = size
+	return b
+}
+
+// Nillable indicates that this field is a nillable.
+// Unlike "Optional" only fields, "Nillable" fields are pointers in the generated struct.
+func (b *arrayBuilder) Nillable() *arrayBuilder {
+	b.desc.Nillable = true
+	return b
+}
+
+// Optional indicates that this field is optional on create.
+// Unlike edges, fields are required by default.
+func (b *arrayBuilder) Optional() *arrayBuilder {
+	b.desc.Optional = true
+	return b
+}
+
+// Immutable indicates that this field cannot be updated.
+func (b *arrayBuilder) Immutable() *arrayBuilder {
+	b.desc.Immutable = true
+	return b
+}
+
+// Comment sets the comment of the field.
+func (b *arrayBuilder) Comment(c string) *arrayBuilder {
+	b.desc.Comment = c
+	return b
+}
+
+// StructTag sets the struct tag of the field.
+func (b *arrayBuilder) StructTag(s string) *arrayBuilder {
+	b.desc.Tag = s
+	return b
+}
+
+// StorageKey sets the storage key of the field.
+// In SQL dialects is the column name and Gremlin is the property.
+func (b *arrayBuilder) StorageKey(key string) *arrayBuilder {
+	b.desc.StorageKey = key
+	return b
+}
+
+// SchemaType overrides the default database type with a custom
+// schema type (per dialect) for arrays.
+//
+//	field.Array("ids", []int64{}).
+//		SchemaType(map[string]string{
+//			dialect.Postgres:      "integer[]",
+//			dialect.MySQL:         "json",
+//			dialect.GoogleSpanner: "ARRAY<INT64>",
+//		})
+//
+//	field.Array("embeddings", []float32{}).
+//		Size(128).
+//		SchemaType(map[string]string{
+//			dialect.Postgres:      "real[]",
+//			dialect.GoogleSpanner: "ARRAY<FLOAT32>(vector_length=>128)",
+//		})
+func (b *arrayBuilder) SchemaType(types map[string]string) *arrayBuilder {
+	b.desc.SchemaType = types
+	return b
+}
+
+// GoType overrides the default Go type with a custom one.
+// If the provided type implements the Validator interface
+// and no validators have been set, the type validator will
+// be used.
+//
+//	field.Array("data", []string{}).
+//		GoType(CustomStringSlice{})
+func (b *arrayBuilder) GoType(typ any) *arrayBuilder {
+	b.desc.goType(typ)
+	return b
+}
+
+// ValueScanner provides an external value scanner for the given GoType.
+// Using this option allow users to use field types that do not implement
+// the sql.Scanner and driver.Valuer interfaces.
+func (b *arrayBuilder) ValueScanner(vs any) *arrayBuilder {
+	b.desc.ValueScanner = vs
+	return b
+}
+
+// Annotations adds a list of annotations to the field object to be used by
+// codegen extensions.
+//
+//	field.ArrayString("tags").
+//		Annotations(
+//			entgql.OrderField("TAGS"),
+//		)
+func (b *arrayBuilder) Annotations(annotations ...schema.Annotation) *arrayBuilder {
+	b.desc.Annotations = append(b.desc.Annotations, annotations...)
+	return b
+}
+
+// Deprecated marks the field as deprecated. Deprecated fields are not
+// selected by default in queries, and their struct fields are annotated
+// with `deprecated` in the generated code.
+func (b *arrayBuilder) Deprecated(reason ...string) *arrayBuilder {
+	b.desc.Deprecated = true
+	if len(reason) > 0 {
+		b.desc.DeprecatedReason = strings.Join(reason, " ")
+	}
+	return b
+}
+
+// Validate adds a validator for this field. Operation fails if the validation fails.
+func (b *arrayBuilder) Validate(fn any) *arrayBuilder {
+	b.desc.Validators = append(b.desc.Validators, fn)
+	return b
+}
+
+// Descriptor implements the ent.Field interface by returning its descriptor.
+func (b *arrayBuilder) Descriptor() *Descriptor {
+	return b.desc
 }
 
 // otherBuilder is the builder for other fields.
@@ -1461,6 +1600,118 @@ func (b *otherBuilder) Descriptor() *Descriptor {
 	return b.desc
 }
 
+// numericBuilder is the builder for numeric fields.
+type numericBuilder struct {
+	desc *Descriptor
+}
+
+// Unique makes the field unique within all vertices of this type.
+func (b *numericBuilder) Unique() *numericBuilder {
+	b.desc.Unique = true
+	return b
+}
+
+// Nillable indicates that this field is a nillable.
+// Unlike "Optional" only fields, "Nillable" fields are pointers in the generated struct.
+func (b *numericBuilder) Nillable() *numericBuilder {
+	b.desc.Nillable = true
+	return b
+}
+
+// Optional indicates that this field is optional on create.
+// Unlike edges, fields are required by default.
+func (b *numericBuilder) Optional() *numericBuilder {
+	b.desc.Optional = true
+	return b
+}
+
+// Immutable indicates that this field cannot be updated.
+func (b *numericBuilder) Immutable() *numericBuilder {
+	b.desc.Immutable = true
+	return b
+}
+
+// Comment sets the comment of the field.
+func (b *numericBuilder) Comment(c string) *numericBuilder {
+	b.desc.Comment = c
+	return b
+}
+
+// StructTag sets the struct tag of the field.
+func (b *numericBuilder) StructTag(s string) *numericBuilder {
+	b.desc.Tag = s
+	return b
+}
+
+// StorageKey sets the storage key of the field.
+// In SQL dialects is the column name and Gremlin is the property.
+func (b *numericBuilder) StorageKey(key string) *numericBuilder {
+	b.desc.StorageKey = key
+	return b
+}
+
+// SchemaType overrides the default database type with a custom
+// schema type (per dialect) for numeric.
+//
+//	field.Numeric("price", 10, 2).
+//		SchemaType(map[string]string{
+//			dialect.MySQL:    "decimal(10,2)",
+//			dialect.Postgres: "numeric(10,2)",
+//		})
+func (b *numericBuilder) SchemaType(types map[string]string) *numericBuilder {
+	b.desc.SchemaType = types
+	return b
+}
+
+// GoType overrides the default Go type with a custom one.
+// If the provided type implements the Validator interface
+// and no validators have been set, the type validator will
+// be used.
+//
+//	field.Numeric("price", 10, 2).
+//		GoType(shopspring.Decimal{})
+func (b *numericBuilder) GoType(typ any) *numericBuilder {
+	b.desc.goType(typ)
+	return b
+}
+
+// ValueScanner provides an external value scanner for the given GoType.
+// Using this option allow users to use field types that do not implement
+// the sql.Scanner and driver.Valuer interfaces, such as slices and maps
+// or types exist in external packages (e.g., shopspring/decimal).
+func (b *numericBuilder) ValueScanner(vs any) *numericBuilder {
+	b.desc.ValueScanner = vs
+	return b
+}
+
+// Annotations adds a list of annotations to the field object to be used by
+// codegen extensions.
+//
+//	field.Numeric("price", 10, 2).
+//		Annotations(
+//			entgql.OrderField("PRICE"),
+//		)
+func (b *numericBuilder) Annotations(annotations ...schema.Annotation) *numericBuilder {
+	b.desc.Annotations = append(b.desc.Annotations, annotations...)
+	return b
+}
+
+// Deprecated marks the field as deprecated. Deprecated fields are not
+// selected by default in queries, and their struct fields are annotated
+// with `deprecated` in the generated code.
+func (b *numericBuilder) Deprecated(reason ...string) *numericBuilder {
+	b.desc.Deprecated = true
+	if len(reason) > 0 {
+		b.desc.DeprecatedReason = strings.Join(reason, " ")
+	}
+	return b
+}
+
+// Descriptor implements the ent.Field interface by returning its descriptor.
+func (b *numericBuilder) Descriptor() *Descriptor {
+	return b.desc
+}
+
 // A Descriptor for field configuration.
 type Descriptor struct {
 	Tag              string                  // struct tag.
@@ -1483,6 +1734,8 @@ type Descriptor struct {
 	Comment          string                  // field comment.
 	Deprecated       bool                    // mark the field as deprecated.
 	DeprecatedReason string                  // deprecation reason.
+	Precision        int                     // numeric precision.
+	Scale            int                     // numeric scale.
 	Err              error
 }
 

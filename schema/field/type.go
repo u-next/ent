@@ -36,8 +36,8 @@ const (
 	TypeUint64
 	TypeFloat32
 	TypeFloat64
+	TypeNumeric
 	TypeArray
-	TypeProto
 	endTypes
 )
 
@@ -180,18 +180,18 @@ var (
 		TypeUint64:  "uint64",
 		TypeFloat32: "float32",
 		TypeFloat64: "float64",
+		TypeNumeric: "numeric",
 		TypeArray:   "[]any",
-		TypeProto:   "proto.Message",
 	}
 	constNames = [...]string{
-		TypeJSON:  "TypeJSON",
-		TypeUUID:  "TypeUUID",
-		TypeTime:  "TypeTime",
-		TypeEnum:  "TypeEnum",
-		TypeBytes: "TypeBytes",
-		TypeProto: "TypeProto",
-		TypeArray: "TypeArray",
-		TypeOther: "TypeOther",
+		TypeJSON:    "TypeJSON",
+		TypeUUID:    "TypeUUID",
+		TypeTime:    "TypeTime",
+		TypeEnum:    "TypeEnum",
+		TypeBytes:   "TypeBytes",
+		TypeNumeric: "TypeNumeric",
+		TypeArray:   "TypeArray",
+		TypeOther:   "TypeOther",
 	}
 )
 
