@@ -79,12 +79,12 @@ func TestBuilder(t *testing.T) {
 					For(iter).
 					Return(
 						p.F("Id"),
-						sql.As(iter.Elem(), "alert_type"),
+						sql.As(iter.F(), "alert_type"),
 						iter.Offset(),
 					).
 					OrderBy(
 						p.F("Id"),
-						iter.Elem(),
+						iter.F(),
 						iter.Offset(),
 					)
 			}(),

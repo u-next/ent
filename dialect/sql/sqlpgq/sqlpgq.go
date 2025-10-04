@@ -494,21 +494,21 @@ func (r *ReturnBuilder) stmt() {}
 
 // assignment represents a variable assignment in a LET statement.
 type assignment struct {
-	variable string
+	variable Variable
 	value    sql.Querier
 }
 
 // Assign creates a new assignment expression.
 func Assign(name string, value sql.Querier) *assignment {
 	return &assignment{
-		variable: name,
+		variable: Variable(name),
 		value:    value,
 	}
 }
 
 // Var sets the variable name to assign to.
 func (a *assignment) Var(name string) *assignment {
-	a.variable = name
+	a.variable = Variable(name)
 	return a
 }
 
@@ -520,17 +520,7 @@ func (a *assignment) Value(value sql.Querier) *assignment {
 
 // F returns the field access expression for the assigned variable.
 func (a *assignment) F(fields ...string) string {
-	var b sql.Builder
-	b.Ident(a.variable)
-	for _, f := range fields {
-		if strings.HasPrefix(f, "[") && strings.HasSuffix(f, "]") {
-			b.WriteString(f)
-		} else {
-			b.WriteByte('.')
-			b.Ident(f)
-		}
-	}
-	return b.String()
+	return a.variable.F(fields...)
 }
 
 // LetBuilder is a builder for LET statements.
@@ -552,9 +542,7 @@ func (let *LetBuilder) Assign(name string, value sql.Querier) *LetBuilder {
 
 // Append adds more assignments to the LET statement.
 func (l *LetBuilder) Append(as ...*assignment) *LetBuilder {
-	for _, a := range as {
-		l.assignments = append(l.assignments, a)
-	}
+	l.assignments = append(l.assignments, as...)
 	return l
 }
 
@@ -567,7 +555,7 @@ func (l *LetBuilder) Query() (string, []any) {
 			if i > 0 {
 				l.Comma()
 			}
-			l.Ident(a.variable)
+			l.Join(a.variable)
 			l.WriteString(" = ")
 			l.Join(a.value)
 		}
@@ -590,9 +578,7 @@ func GroupBy(items ...string) *GroupByBuilder {
 
 // Append adds more expressions to the GROUP BY statement.
 func (g *GroupByBuilder) Append(items ...string) *GroupByBuilder {
-	for _, item := range items {
-		g.items = append(g.items, item)
-	}
+	g.items = append(g.items, items...)
 	return g
 }
 
@@ -745,19 +731,19 @@ func (o *OffsetBuilder) stmt() {}
 // ForBuilder is a builder for FOR statements.
 type ForBuilder struct {
 	sql.Builder
-	element string
+	element Variable
 	array   sql.Querier
 	offset  string
 }
 
 // Element creates a new FOR statement builder with the given element name.
 func Element(name string) *ForBuilder {
-	return &ForBuilder{element: name}
+	return &ForBuilder{element: Variable(name)}
 }
 
 // Element sets the element variable name.
 func (f *ForBuilder) Element(name string) *ForBuilder {
-	f.element = name
+	f.element = Variable(name)
 	return f
 }
 
@@ -784,7 +770,7 @@ func (f *ForBuilder) Query() (string, []any) {
 	f.WriteString("FOR")
 	if f.element != "" {
 		f.Pad()
-		f.Ident(f.element)
+		f.Join(f.element)
 	}
 	f.WriteString(" IN")
 	if f.array != nil {
@@ -801,9 +787,9 @@ func (f *ForBuilder) Query() (string, []any) {
 	return f.String(), f.GetArgs()
 }
 
-// Elem returns the element variable name.
-func (f *ForBuilder) Elem() string {
-	return fmt.Sprintf("`%s`", f.element)
+// F returns the field access expression for the element variable.
+func (f *ForBuilder) F(fields ...string) string {
+	return f.element.F(fields...)
 }
 
 // Offset returns the offset variable name.
@@ -862,9 +848,7 @@ func WithDistinct(items ...string) *WithBuilder {
 
 // Append adds more return items to the WITH statement.
 func (w *WithBuilder) Append(items ...string) *WithBuilder {
-	for _, item := range items {
-		w.items = append(w.items, item)
-	}
+	w.items = append(w.items, items...)
 	return w
 }
 
@@ -895,27 +879,6 @@ func (w *WithBuilder) Query() (string, []any) {
 }
 
 func (w *WithBuilder) stmt() {}
-
-// SetOp represents different set operation types.
-type SetOp int
-
-const (
-	SetUnionAll SetOp = iota
-	SetUnionDistinct
-	SetIntersectAll
-	SetIntersectDistinct
-	SetExceptAll
-	SetExceptDistinct
-)
-
-var setOpStrings = [...]string{
-	SetUnionAll:          "UNION ALL",
-	SetUnionDistinct:     "UNION DISTINCT",
-	SetIntersectAll:      "INTERSECT ALL",
-	SetIntersectDistinct: "INTERSECT DISTINCT",
-	SetExceptAll:         "EXCEPT ALL",
-	SetExceptDistinct:    "EXCEPT DISTINCT",
-}
 
 type SetOperation func(*sql.Builder)
 
@@ -1018,108 +981,11 @@ func (g *GraphTableWrapper) C(column string) string {
 	return b.String()
 }
 
-// An Op represents an operator in GQL.
-type Op int
-
-// GQL operators.
-const (
-	OpEQ      Op = iota // =
-	OpNEQ               // <>
-	OpGT                // >
-	OpGTE               // >=
-	OpLT                // <
-	OpLTE               // <=
-	OpIn                // IN
-	OpNotIn             // NOT IN
-	OpLike              // LIKE
-	OpIsNull            // IS NULL
-	OpNotNull           // IS NOT NULL
-	OpAdd               // +
-	OpSub               // -
-	OpMul               // *
-	OpDiv               // / (Quotient)
-	OpMod               // % (Reminder)
-	OpAnd               // AND
-	OpOr                // OR
-	OpNot               // NOT
-	// GQL-specific operators
-	OpConcat           // || (graph path concatenation)
-	OpGraphOr          // | (graph logical OR)
-	OpGraphAnd         // & (graph logical AND)
-	OpGraphNot         // ! (graph logical NOT)
-	OpIsLabeled        // IS LABELED
-	OpIsNotLabeled     // IS NOT LABELED
-	OpIsSource         // IS SOURCE
-	OpIsNotSource      // IS NOT SOURCE
-	OpIsDestination    // IS DESTINATION
-	OpIsNotDestination // IS NOT DESTINATION
-)
-
-var gqlOps = [...]string{
-	OpEQ:               "=",
-	OpNEQ:              "<>",
-	OpGT:               ">",
-	OpGTE:              ">=",
-	OpLT:               "<",
-	OpLTE:              "<=",
-	OpIn:               "IN",
-	OpNotIn:            "NOT IN",
-	OpLike:             "LIKE",
-	OpIsNull:           "IS NULL",
-	OpNotNull:          "IS NOT NULL",
-	OpAdd:              "+",
-	OpSub:              "-",
-	OpMul:              "*",
-	OpDiv:              "/",
-	OpMod:              "%",
-	OpAnd:              "AND",
-	OpOr:               "OR",
-	OpNot:              "NOT",
-	OpConcat:           "||",
-	OpGraphOr:          "|",
-	OpGraphAnd:         "&",
-	OpGraphNot:         "!",
-	OpIsLabeled:        "IS LABELED",
-	OpIsNotLabeled:     "IS NOT LABELED",
-	OpIsSource:         "IS SOURCE",
-	OpIsNotSource:      "IS NOT SOURCE",
-	OpIsDestination:    "IS DESTINATION",
-	OpIsNotDestination: "IS NOT DESTINATION",
-}
-
-// isFunc reports if the given string is a function call.
-func isFunc(s string) bool {
-	return strings.Contains(s, "(") && strings.Contains(s, ")")
-}
-
-// isModifier reports if the given string is a GQL modifier.
-func isModifier(s string) bool {
-	for _, m := range [...]string{
-		"DISTINCT", "ALL", "ASC", "DESC",
-		"SHORTEST", "ANY", "ALL_DIFFERENT", "SAME",
-		"PROPERTY_EXISTS", "LABELS", "PROPERTIES", "TYPE",
-		"PATH", "NODES", "EDGES", "LENGTH",
-		"IS LABELED", "IS SOURCE", "IS DESTINATION",
-		"IS NOT LABELED", "IS NOT SOURCE", "IS NOT DESTINATION",
-		"EXISTS", "WHERE", "OPTIONAL",
-	} {
-		if strings.HasPrefix(strings.ToUpper(s), m) {
-			return true
-		}
-	}
-	return false
-}
-
-// isAlias reports if the given string contains an alias.
-func isAlias(s string) bool {
-	return strings.Contains(s, " AS ") || strings.Contains(s, " as ")
-}
-
 // Concat concatenates two path patterns with the || operator.
 func Concat(p, q *PathPattern) sql.Querier {
 	var b sql.Builder
 	if p.variable != "" {
-		b.Ident(p.variable)
+		b.Join(p.variable)
 	} else {
 		b.Wrap(func(b *sql.Builder) {
 			b.Join(p)
@@ -1127,7 +993,7 @@ func Concat(p, q *PathPattern) sql.Querier {
 	}
 	b.WriteString(" || ")
 	if q.variable != "" {
-		b.Ident(q.variable)
+		b.Join(q.variable)
 	} else {
 		b.Wrap(func(b *sql.Builder) {
 			b.Join(q)
@@ -1174,7 +1040,7 @@ type Pattern interface {
 // PathPattern is a builder for path patterns.
 type PathPattern struct {
 	sql.Builder
-	variable     string
+	variable     Variable
 	searchPrefix PathSearchPrefix
 	pathMode     PathMode
 	elements     []sql.Querier
@@ -1227,7 +1093,7 @@ func (p *PathPattern) Path(path *PathPattern) *PathPattern {
 
 // Variable sets the path variable.
 func (p *PathPattern) Variable(name string) *PathPattern {
-	p.variable = name
+	p.variable = Variable(name)
 	return p
 }
 
@@ -1293,14 +1159,9 @@ func (p *PathPattern) Bounded(lower, upper *int) *PathPattern {
 	return p
 }
 
-// C returns a formatted string for the table column.
-func (p *PathPattern) C(column string) string {
-	var b sql.Builder
-	if p.variable == "" {
-		return column
-	}
-	b.Ident(p.variable).WriteByte('.').Ident(column)
-	return b.String()
+// F returns the field access expression for the path variable.
+func (p *PathPattern) F(fields ...string) string {
+	return p.variable.F(fields...)
 }
 
 // Query returns the path pattern representation.
@@ -1311,7 +1172,7 @@ func (p *PathPattern) Query() (string, []any) {
 		b.WriteByte('(')
 	}
 	if p.variable != "" {
-		b.Ident(p.variable)
+		b.Join(p.variable)
 		b.WriteString(" = ")
 	}
 	if p.searchPrefix != PrefixAll {
@@ -1365,7 +1226,7 @@ func Node(name string, labels ...string) *NodePattern {
 
 // Named sets the node variable.
 func (n *NodePattern) Named(name string) *NodePattern {
-	n.filler.variable = name
+	n.filler.variable = Variable(name)
 	return n
 }
 
@@ -1407,7 +1268,7 @@ func (n *NodePattern) Where(condition *sql.Predicate) *NodePattern {
 func (n *NodePattern) F(fields ...string) string {
 	var b sql.Builder
 	if n.filler.variable != "" {
-		b.Ident(n.filler.variable)
+		b.Join(n.filler.variable)
 	}
 	for _, field := range fields {
 		b.WriteByte('.').Ident(field)
@@ -1486,7 +1347,7 @@ func (e *EdgePattern) AnyDirection() *EdgePattern {
 
 // Named sets the edge variable.
 func (e *EdgePattern) Named(name string) *EdgePattern {
-	e.filler.variable = name
+	e.filler.variable = Variable(name)
 	return e
 }
 
@@ -1532,14 +1393,7 @@ func (e *EdgePattern) Abbreviated() *EdgePattern {
 
 // F returns the field access expression for the edge variable.
 func (e *EdgePattern) F(fields ...string) string {
-	var b sql.Builder
-	if e.filler.variable != "" {
-		b.Ident(e.filler.variable)
-	}
-	for _, field := range fields {
-		b.WriteByte('.').Ident(field)
-	}
-	return b.String()
+	return e.filler.variable.F(fields...)
 }
 
 // Query returns the edge pattern representation.
@@ -1565,7 +1419,7 @@ func (e *EdgePattern) pattern() {}
 
 type patternFiller struct {
 	sql.Builder
-	variable   string
+	variable   Variable
 	labelExpr  *labelExpr
 	properties map[string]sql.Querier
 	where      *sql.Predicate
@@ -1574,7 +1428,7 @@ type patternFiller struct {
 func (p *patternFiller) Query() (string, []any) {
 	b := p.Clone()
 	if p.variable != "" {
-		b.Ident(p.variable)
+		b.Join(p.variable)
 	}
 	if p.labelExpr != nil {
 		b.WriteByte(':')
@@ -1999,4 +1853,30 @@ func ValueQuery(expr *GraphQuery) sql.Querier {
 			b.Dedent().NewLine()
 		})
 	})
+}
+
+type Variable string
+
+func (v Variable) Query() (string, []any) {
+	var b sql.Builder
+	if b.IsIdent(string(v)) {
+		b.WriteString(string(v))
+	} else {
+		b.Ident(string(v))
+	}
+	return b.Query()
+}
+
+func (v Variable) F(fields ...string) string {
+	var b sql.Builder
+	b.Ident(string(v))
+	for _, f := range fields {
+		if strings.HasPrefix(f, "[") && strings.HasSuffix(f, "]") {
+			b.WriteString(f)
+		} else {
+			b.WriteByte('.')
+			b.Ident(f)
+		}
+	}
+	return b.String()
 }
