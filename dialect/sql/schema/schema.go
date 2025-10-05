@@ -553,7 +553,7 @@ func indexType(idx *Index, d string) (string, bool) {
 	return "", false
 }
 
-// PropertyGraph represents a property graph schema definition for GQL dialects.
+// PropertyGraph represents a property graph schema definition.
 type PropertyGraph struct {
 	schema.Object
 	Name       string

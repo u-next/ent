@@ -265,11 +265,6 @@ func (pg *PropertyGraphBuilder) Query() (string, []any) {
 	return b.String(), b.GetArgs()
 }
 
-// writeEdgeTable writes an edge table definition.
-func (pg *PropertyGraphBuilder) writeEdgeTable(et *EdgeTableBuilder) {
-	pg.Join(et)
-}
-
 // NodeTable returns a new node table builder.
 func NodeTable(tableName string) *NodeTableBuilder {
 	return &NodeTableBuilder{tableName: tableName}

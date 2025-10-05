@@ -1511,6 +1511,51 @@ func (f *Func) Avg(ident string) {
 	f.ByName("AVG", ident)
 }
 
+// Coalesce wraps the idents with the COALESCE function.
+func Coalesce(idents ...string) string {
+	f := &Func{}
+	f.Coalesce(idents...)
+	return f.String()
+}
+
+// Coalesce wraps the idents with the COALESCE function.
+func (f *Func) Coalesce(idents ...string) {
+	f.ByName("COALESCE", idents...)
+}
+
+// IfNull wraps the ident with the IFNULL function.
+// Note that the IFNULL expression is not part of the SQL standard.
+func IfNull(ident string, null string) string {
+	f := &Func{}
+	f.IfNull(ident, null)
+	return f.String()
+}
+
+// IfNull wraps the ident with the IFNULL function.
+func (f *Func) IfNull(ident string, null string) {
+	switch f.dialect {
+	case dialect.MySQL, dialect.SQLite, dialect.Spanner:
+		f.ByName("IFNULL", ident, null)
+	case dialect.Postgres:
+		// Use COALESCE for PostgreSQL.
+		f.ByName("COALESCE", ident, null)
+	default:
+		f.AddError(fmt.Errorf("IFNULL expression is not supported by %q dialect", f.dialect))
+	}
+}
+
+// NullIf returns a NULLIF expression.
+func NullIf(ident string, equals string) string {
+	f := &Func{}
+	f.NullIf(ident, equals)
+	return f.String()
+}
+
+// NullIf wraps the ident with the NULLIF function.
+func (f *Func) NullIf(ident string, equals string) {
+	f.ByName("NULLIF", ident, equals)
+}
+
 // ByName wraps an identifier with a function name.
 func (f *Func) ByName(fn string, ident ...string) {
 	f.Append(func(b *Builder) {
@@ -1550,6 +1595,122 @@ func (f *Func) Query() (string, []any) {
 func (f *Func) String() string {
 	query, _ := f.Query()
 	return query
+}
+
+// V wraps a value to be used in expressions.
+// It's a shorthand for sql.ExprFunc.
+func V(v any) Querier {
+	return ExprFunc(func(b *Builder) {
+		b.Arg(v)
+	})
+}
+
+// CaseBuilder is a builder for a CASE expression.
+type CaseBuilder struct {
+	Builder
+	expr  Querier
+	whens [][2]Querier
+	els   Querier
+}
+
+// Case returns a new CaseBuilder.
+//
+//	sql.Case().When(predicate, result)
+func Case() *CaseBuilder {
+	c := &CaseBuilder{}
+	return c
+}
+
+// CaseExpr returns a new CaseBuilder with the given expression.
+//
+//	sql.CaseExpr(column).When(value, result)
+func CaseExpr(expr Querier) *CaseBuilder {
+	c := &CaseBuilder{expr: expr}
+	return c
+}
+
+// WhenMatch adds a WHEN ... THEN ... clause to the CASE expression.
+func (c *CaseBuilder) WhenMatch(value any, column string) *CaseBuilder {
+	ident := ExprFunc(func(b *Builder) {
+		b.Ident(column)
+	})
+	c.whens = append(c.whens, [2]Querier{V(value), ident})
+	return c
+}
+
+// WhenMatchExpr adds a WHEN ... THEN ... clause to the CASE expression.
+func (c *CaseBuilder) WhenMatchExpr(value any, result Querier) *CaseBuilder {
+	c.whens = append(c.whens, [2]Querier{V(value), result})
+	return c
+}
+
+// When adds a WHEN ... THEN ... clause to the CASE expression.
+func (c *CaseBuilder) When(condition *Predicate, column string) *CaseBuilder {
+	ident := ExprFunc(func(b *Builder) {
+		b.Ident(column)
+	})
+	c.whens = append(c.whens, [2]Querier{condition, ident})
+	return c
+}
+
+// When adds a WHEN ... THEN ... clause to the CASE expression.
+func (c *CaseBuilder) WhenExpr(condition *Predicate, result Querier) *CaseBuilder {
+	c.whens = append(c.whens, [2]Querier{condition, result})
+	return c
+}
+
+// Else adds an ELSE result to the CASE expression.
+func (c *CaseBuilder) Else(result Querier) *CaseBuilder {
+	c.els = result
+	return c
+}
+
+// Query returns the query representation of the element
+// and its arguments (if any).
+func (c *CaseBuilder) Query() (string, []any) {
+	c.WriteString("CASE")
+	if c.expr != nil {
+		c.WriteString(" ")
+		c.Join(c.expr)
+	}
+	for _, w := range c.whens {
+		c.WriteString(" WHEN ")
+		c.Join(w[0])
+		c.WriteString(" THEN ")
+		c.Join(w[1])
+	}
+	if c.els != nil {
+		c.WriteString(" ELSE ")
+		c.Join(c.els)
+	}
+	c.WriteString(" END")
+	return c.String(), c.args
+}
+
+// If returns an IF expression.
+// Note that the IF expression is not part of the SQL standard.
+func If(p *Predicate, thenE Querier, elseE Querier) *Func {
+	f := &Func{}
+	f.Append(func(b *Builder) {
+		switch b.dialect {
+		case dialect.MySQL, dialect.Spanner:
+			f.ByExpr("IF", p, thenE, elseE)
+		case dialect.SQLite:
+			f.ByExpr("IIF", p, thenE, elseE)
+		case dialect.Postgres:
+			// Use CASE for PostgreSQL.
+			b.WriteString("CASE WHEN ")
+			b.Join(p)
+			b.WriteString(" THEN ")
+			b.Join(thenE)
+			b.WriteString(" ELSE ")
+			b.Join(elseE)
+			b.WriteString(" END")
+		default:
+			b.AddError(fmt.Errorf("IF expression is not supported by %q dialect", b.dialect))
+		}
+	})
+	return f
 }
 
 // As suffixed the given column with an alias (`a` AS `b`).

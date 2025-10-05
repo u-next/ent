@@ -11,7 +11,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlhint"
 )
 
-// GraphQuery is a builder for complete GQL queries.
+// GraphQuery is a builder for property graph queries.
 type GraphQuery struct {
 	sql.Builder
 	graph string        // property graph name
@@ -202,7 +202,7 @@ func (g *GraphQuery) ExceptDistinct() *GraphQuery {
 	return g.Append(ExceptDistinct)
 }
 
-// Query returns the GQL query representation.
+// Query returns the property graph query representation.
 func (g *GraphQuery) Query() (string, []any) {
 	if g.graph != "" {
 		g.WriteString("GRAPH ")

@@ -68,7 +68,6 @@ func (s *Spanner) tableExist(ctx context.Context, conn dialect.ExecQuerier, name
 	return false, nil
 }
 
-// graphExist implements the gqlDialect interface
 func (s *Spanner) graphExist(ctx context.Context, drv dialect.ExecQuerier, name string) (bool, error) {
 	// Ensure we're initialized
 	if err := s.init(ctx); err != nil {
