@@ -1,15 +1,25 @@
 package sqlarray
 
 import (
+	"errors"
 	"strconv"
 
 	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/sql"
 )
 
+// checkArraySupport adds an error if the dialect doesn't support arrays.
+func checkArraySupport(b *sql.Builder) {
+	switch b.Dialect() {
+	case dialect.MySQL, dialect.SQLite:
+		b.AddError(errors.New("arrays are not supported by " + b.Dialect()))
+	}
+}
+
 // Array wraps the expression with the ARRAY function (GoogleSQL).
 func Array(e string) func(*sql.Builder) {
 	return func(b *sql.Builder) {
+		checkArraySupport(b)
 		b.WriteString("ARRAY(")
 		b.WriteString(e)
 		b.WriteString(")")
@@ -17,10 +27,13 @@ func Array(e string) func(*sql.Builder) {
 }
 
 // ArrayOf creates an ARRAY expression from a sql.Querier.
-func ArrayOf(q sql.Querier) *sql.Func {
-	f := &sql.Func{}
-	f.ByExpr("ARRAY", q)
-	return f
+func ArrayOf(q sql.Querier) sql.Querier {
+	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
+		b.WriteString("ARRAY(")
+		b.Join(q)
+		b.WriteString(")")
+	})
 }
 
 // Literal creates an array literal from values.
@@ -28,6 +41,7 @@ func ArrayOf(q sql.Querier) *sql.Func {
 // For Spanner: Literal(1, 2, 3) produces [1, 2, 3]
 func Literal(values ...any) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.WriteString("'{")
@@ -65,6 +79,7 @@ func Literal(values ...any) sql.Querier {
 // For Spanner: ArrayConstructor(1, 2, 3) produces [1, 2, 3]
 func ArrayConstructor(values ...any) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.WriteString("ARRAY[")
@@ -92,6 +107,7 @@ func ArrayConstructor(values ...any) sql.Querier {
 // ArrayAgg creates an ARRAY_AGG expression with optional ordering.
 func ArrayAgg(expr sql.Querier, orderBy ...sql.Querier) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		b.WriteString("ARRAY_AGG(")
 		b.Join(expr)
 		if len(orderBy) > 0 {
@@ -140,6 +156,7 @@ func (u *UnnestBuilder) WithOffsetAs(offset string) *UnnestBuilder {
 
 func (u *UnnestBuilder) Query() string {
 	b := u.Builder.Clone()
+	checkArraySupport(&b)
 	
 	// Both PostgreSQL and Spanner use the same UNNEST(array) syntax
 	b.WriteString("UNNEST(")
@@ -177,6 +194,7 @@ func (u *UnnestBuilder) Query() string {
 // For Spanner: uses 0-based OFFSET: my_array[OFFSET(0)]
 func Index(array sql.Querier, index int) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		b.Join(array)
 		switch b.Dialect() {
 		case dialect.Postgres:
@@ -198,6 +216,7 @@ func Index(array sql.Querier, index int) sql.Querier {
 // For Spanner: Slice("my_array", 2, 4) produces ARRAY_SLICE(my_array, 2, 4)
 func Slice(array sql.Querier, start, end int) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.Join(array)
@@ -223,6 +242,7 @@ func Slice(array sql.Querier, start, end int) sql.Querier {
 // Example: Offset("my_array", 0) produces my_array[OFFSET(0)]
 func Offset(array sql.Querier, index int) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		b.Join(array)
 		b.WriteString("[OFFSET(")
 		b.WriteString(strconv.Itoa(index))
@@ -234,6 +254,7 @@ func Offset(array sql.Querier, index int) sql.Querier {
 // Example: SafeOffset("my_array", 0) produces my_array[SAFE_OFFSET(0)]
 func SafeOffset(array sql.Querier, index int) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		b.Join(array)
 		b.WriteString("[SAFE_OFFSET(")
 		b.WriteString(strconv.Itoa(index))
@@ -245,6 +266,7 @@ func SafeOffset(array sql.Querier, index int) sql.Querier {
 // Example: Ordinal("my_array", 1) produces my_array[ORDINAL(1)]
 func Ordinal(array sql.Querier, index int) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		b.Join(array)
 		b.WriteString("[ORDINAL(")
 		b.WriteString(strconv.Itoa(index))
@@ -256,6 +278,7 @@ func Ordinal(array sql.Querier, index int) sql.Querier {
 // Example: SafeOrdinal("my_array", 1) produces my_array[SAFE_ORDINAL(1)]
 func SafeOrdinal(array sql.Querier, index int) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		b.Join(array)
 		b.WriteString("[SAFE_ORDINAL(")
 		b.WriteString(strconv.Itoa(index))
@@ -270,6 +293,7 @@ func SafeOrdinal(array sql.Querier, index int) sql.Querier {
 // For Spanner: uses ARRAY_INCLUDES_ANY
 func Overlap(left, right sql.Querier) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.Join(left)
@@ -291,6 +315,7 @@ func Overlap(left, right sql.Querier) *sql.Predicate {
 // For Spanner: uses ARRAY_INCLUDES_ALL
 func ContainsArray(left, right sql.Querier) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.Join(left)
@@ -312,6 +337,7 @@ func ContainsArray(left, right sql.Querier) *sql.Predicate {
 // For Spanner: uses ARRAY_INCLUDES_ALL with reversed arguments
 func ContainedBy(left, right sql.Querier) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.Join(left)
@@ -331,6 +357,7 @@ func ContainedBy(left, right sql.Querier) *sql.Predicate {
 // ArrayEqual checks if two arrays are equal.
 func ArrayEqual(left, right sql.Querier) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		b.Join(left)
 		b.WriteString(" = ")
 		b.Join(right)
@@ -340,6 +367,7 @@ func ArrayEqual(left, right sql.Querier) *sql.Predicate {
 // ArrayNotEqual checks if two arrays are not equal.
 func ArrayNotEqual(left, right sql.Querier) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		b.Join(left)
 		b.WriteString(" <> ")
 		b.Join(right)
@@ -353,6 +381,7 @@ func ArrayNotEqual(left, right sql.Querier) *sql.Predicate {
 // For Spanner: Length("my_array") produces ARRAY_LENGTH(my_array)
 func Length(array sql.Querier) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.WriteString("ARRAY_LENGTH(")
@@ -371,6 +400,7 @@ func Length(array sql.Querier) sql.Querier {
 // For Spanner: Concat(array1, array2, array3) produces ARRAY_CONCAT(array1, array2, array3)
 func Concat(arrays ...sql.Querier) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			if len(arrays) == 0 {
@@ -405,6 +435,7 @@ func Concat(arrays ...sql.Querier) sql.Querier {
 // For Spanner: ToString("my_array", ",") produces ARRAY_TO_STRING(my_array, ',')
 func ToString(array sql.Querier, delimiter string) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		b.WriteString("ARRAY_TO_STRING(")
 		b.Join(array)
 		b.WriteString(", ")
@@ -418,6 +449,7 @@ func ToString(array sql.Querier, delimiter string) sql.Querier {
 // For Spanner: ToStringWithNull("my_array", ",", "NULL") produces ARRAY_TO_STRING(my_array, ',', 'NULL')
 func ToStringWithNull(array sql.Querier, delimiter, nullString string) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		b.WriteString("ARRAY_TO_STRING(")
 		b.Join(array)
 		b.WriteString(", ")
@@ -430,10 +462,13 @@ func ToStringWithNull(array sql.Querier, delimiter, nullString string) sql.Queri
 
 // Reverse reverses the order of elements in an array.
 // Example: Reverse("my_array") produces ARRAY_REVERSE(my_array)
-func Reverse(array sql.Querier) *sql.Func {
-	f := &sql.Func{}
-	f.ByExpr("ARRAY_REVERSE", array)
-	return f
+func Reverse(array sql.Querier) sql.Querier {
+	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
+		b.WriteString("ARRAY_REVERSE(")
+		b.Join(array)
+		b.WriteString(")")
+	})
 }
 
 // Additional array functions
@@ -443,6 +478,7 @@ func Reverse(array sql.Querier) *sql.Func {
 // For Spanner: uses ARRAY_FIRST(array)
 func First(array sql.Querier) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.Join(array)
@@ -460,6 +496,7 @@ func First(array sql.Querier) sql.Querier {
 // For Spanner: uses ARRAY_LAST(array)
 func Last(array sql.Querier) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.Join(array)
@@ -479,6 +516,7 @@ func Last(array sql.Querier) sql.Querier {
 // For Spanner: uses UNNEST with OFFSET approach (no built-in equivalent)
 func Position(array sql.Querier, value any) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.WriteString("ARRAY_POSITION(")
@@ -502,6 +540,7 @@ func Position(array sql.Querier, value any) sql.Querier {
 // For Spanner: uses ARRAY_CONCAT
 func Append(array sql.Querier, value any) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.WriteString("ARRAY_APPEND(")
@@ -525,6 +564,7 @@ func Append(array sql.Querier, value any) sql.Querier {
 // For Spanner: uses ARRAY_CONCAT
 func Prepend(value any, array sql.Querier) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.WriteString("ARRAY_PREPEND(")
@@ -548,6 +588,7 @@ func Prepend(value any, array sql.Querier) sql.Querier {
 // For Spanner: uses ARRAY_FILTER
 func Remove(array sql.Querier, value any) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.WriteString("ARRAY_REMOVE(")
@@ -571,6 +612,7 @@ func Remove(array sql.Querier, value any) sql.Querier {
 // For Spanner: uses SPLIT function
 func StringToArray(str, delimiter string) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.WriteString("STRING_TO_ARRAY(")
@@ -595,6 +637,7 @@ func StringToArray(str, delimiter string) sql.Querier {
 // Example: Transform("my_array", "elem", "elem * 2") produces ARRAY_TRANSFORM(my_array, elem -> elem * 2)
 func Transform(array sql.Querier, var_, expr string) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			// PostgreSQL doesn't have a direct equivalent, would need more complex SQL
@@ -616,6 +659,7 @@ func Transform(array sql.Querier, var_, expr string) sql.Querier {
 // Example: Filter("my_array", "elem", "elem > 5") produces ARRAY_FILTER(my_array, elem -> elem > 5)
 func Filter(array sql.Querier, var_, condition string) sql.Querier {
 	return sql.ExprFunc(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			// PostgreSQL doesn't have a direct equivalent
@@ -636,6 +680,7 @@ func Filter(array sql.Querier, var_, condition string) sql.Querier {
 // Example: IsDistinct("my_array") produces ARRAY_IS_DISTINCT(my_array)
 func IsDistinct(array sql.Querier) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			// PostgreSQL equivalent using array comparison
@@ -658,6 +703,7 @@ func IsDistinct(array sql.Querier) *sql.Predicate {
 // For Spanner: Contains("my_array", 5) produces ARRAY_INCLUDES(my_array, 5)
 func Contains(array sql.Querier, value any) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.Arg(value)
@@ -680,6 +726,7 @@ func Contains(array sql.Querier, value any) *sql.Predicate {
 // For Spanner: NotContains("my_array", 5) produces NOT ARRAY_INCLUDES(my_array, 5)
 func NotContains(array sql.Querier, value any) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.Arg(value)
@@ -702,6 +749,7 @@ func NotContains(array sql.Querier, value any) *sql.Predicate {
 // For Spanner: IsEmpty("my_array") produces ARRAY_LENGTH(my_array) = 0
 func IsEmpty(array sql.Querier) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			// PostgreSQL arrays can be NULL, and array_length returns NULL for empty arrays
@@ -723,6 +771,7 @@ func IsEmpty(array sql.Querier) *sql.Predicate {
 // For Spanner: IsNotEmpty("my_array") produces ARRAY_LENGTH(my_array) > 0
 func IsNotEmpty(array sql.Querier) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.WriteString("array_length(")
@@ -741,6 +790,7 @@ func IsNotEmpty(array sql.Querier) *sql.Predicate {
 // For Spanner: LengthEQ("my_array", 3) produces ARRAY_LENGTH(my_array) = 3
 func LengthEQ(array sql.Querier, length int) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.WriteString("array_length(")
@@ -761,6 +811,7 @@ func LengthEQ(array sql.Querier, length int) *sql.Predicate {
 // For Spanner: LengthGT("my_array", 3) produces ARRAY_LENGTH(my_array) > 3
 func LengthGT(array sql.Querier, length int) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.WriteString("array_length(")
@@ -781,6 +832,7 @@ func LengthGT(array sql.Querier, length int) *sql.Predicate {
 // For Spanner: LengthLT("my_array", 3) produces ARRAY_LENGTH(my_array) < 3
 func LengthLT(array sql.Querier, length int) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.WriteString("array_length(")
@@ -801,6 +853,7 @@ func LengthLT(array sql.Querier, length int) *sql.Predicate {
 // For Spanner: LengthGTE("my_array", 3) produces ARRAY_LENGTH(my_array) >= 3
 func LengthGTE(array sql.Querier, length int) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.WriteString("array_length(")
@@ -821,6 +874,7 @@ func LengthGTE(array sql.Querier, length int) *sql.Predicate {
 // For Spanner: LengthLTE("my_array", 3) produces ARRAY_LENGTH(my_array) <= 3
 func LengthLTE(array sql.Querier, length int) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			b.WriteString("array_length(")
@@ -840,6 +894,7 @@ func LengthLTE(array sql.Querier, length int) *sql.Predicate {
 // For PostgreSQL: uses overlap with constructed array
 func IncludesAny(array sql.Querier, values ...any) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			// Use overlap operator with constructed array
@@ -872,6 +927,7 @@ func IncludesAny(array sql.Querier, values ...any) *sql.Predicate {
 // For Spanner: uses ARRAY_INCLUDES_ALL
 func IncludesAll(array sql.Querier, values ...any) *sql.Predicate {
 	return sql.P(func(b *sql.Builder) {
+		checkArraySupport(b)
 		switch b.Dialect() {
 		case dialect.Postgres:
 			// Use @> operator with constructed array
