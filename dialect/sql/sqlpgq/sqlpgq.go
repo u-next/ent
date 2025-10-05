@@ -138,17 +138,17 @@ func (g *GraphQuery) OrderByExpr(exprs ...sql.Querier) *GraphQuery {
 }
 
 // Limit adds a LIMIT statement to the linear query.
-func (g *GraphQuery) Limit(count int64) *GraphQuery {
+func (g *GraphQuery) Limit(count int) *GraphQuery {
 	return g.Append(Limit(count))
 }
 
 // Offset adds an OFFSET statement to the linear query.
-func (g *GraphQuery) Offset(count int64) *GraphQuery {
+func (g *GraphQuery) Offset(count int) *GraphQuery {
 	return g.Append(Offset(count))
 }
 
 // Skip is an alias for Offset that uses the SKIP keyword.
-func (g *GraphQuery) Skip(count int64) *GraphQuery {
+func (g *GraphQuery) Skip(count int) *GraphQuery {
 	return g.Append(Skip(count))
 }
 
@@ -632,16 +632,16 @@ func (o *OrderByBuilder) stmt() {}
 // LimitBuilder is a builder for LIMIT statements.
 type LimitBuilder struct {
 	sql.Builder
-	count int64
+	count int
 }
 
 // Limit creates a new LIMIT statement builder.
-func Limit(count int64) *LimitBuilder {
+func Limit(count int) *LimitBuilder {
 	return &LimitBuilder{count: count}
 }
 
 // Count sets the limit count.
-func (l *LimitBuilder) Count(count int64) *LimitBuilder {
+func (l *LimitBuilder) Count(count int) *LimitBuilder {
 	l.count = count
 	return l
 }
@@ -649,7 +649,7 @@ func (l *LimitBuilder) Count(count int64) *LimitBuilder {
 // Query returns the LIMIT statement representation.
 func (l *LimitBuilder) Query() (string, []any) {
 	l.WriteString("LIMIT ")
-	l.WriteString(strconv.FormatInt(l.count, 10))
+	l.WriteString(strconv.Itoa(l.count))
 	return l.String(), l.GetArgs()
 }
 
@@ -659,21 +659,21 @@ func (l *LimitBuilder) stmt() {}
 type OffsetBuilder struct {
 	sql.Builder
 	skip  bool
-	count int64
+	count int
 }
 
 // Offset creates a new OFFSET statement builder.
-func Offset(count int64) *OffsetBuilder {
+func Offset(count int) *OffsetBuilder {
 	return &OffsetBuilder{count: count}
 }
 
 // Skip creates a new SKIP statement builder.
-func Skip(count int64) *OffsetBuilder {
+func Skip(count int) *OffsetBuilder {
 	return &OffsetBuilder{skip: true, count: count}
 }
 
 // Count sets the offset count.
-func (o *OffsetBuilder) Count(count int64) *OffsetBuilder {
+func (o *OffsetBuilder) Count(count int) *OffsetBuilder {
 	o.count = count
 	return o
 }
@@ -685,7 +685,7 @@ func (o *OffsetBuilder) Query() (string, []any) {
 	} else {
 		o.WriteString("OFFSET ")
 	}
-	o.WriteString(strconv.FormatInt(o.count, 10))
+	o.WriteString(strconv.Itoa(o.count))
 	return o.String(), o.GetArgs()
 }
 
@@ -1166,14 +1166,26 @@ func (n *NodePattern) LabelExpr(expr *labelExpr) *NodePattern {
 	return n
 }
 
-// Property adds a property filter.
-func (n *NodePattern) Property(key string, expr sql.Querier) *NodePattern {
+func (n *NodePattern) Property(key string, value any) *NodePattern {
+	n.filler.properties[key] = sql.V(value)
+	return n
+}
+
+func (n *NodePattern) Properties(props map[string]any) *NodePattern {
+	for k, v := range props {
+		n.filler.properties[k] = sql.V(v)
+	}
+	return n
+}
+
+// PropertyExpr adds a property filter.
+func (n *NodePattern) PropertyExpr(key string, expr sql.Querier) *NodePattern {
 	n.filler.properties[key] = expr
 	return n
 }
 
-// Properties adds multiple property filters.
-func (n *NodePattern) Properties(props map[string]sql.Querier) *NodePattern {
+// PropertiesExpr adds multiple property filters.
+func (n *NodePattern) PropertiesExpr(props map[string]sql.Querier) *NodePattern {
 	maps.Copy(n.filler.properties, props)
 	return n
 }

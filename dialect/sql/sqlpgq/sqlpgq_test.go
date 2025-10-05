@@ -209,7 +209,7 @@ func TestBuilder(t *testing.T) {
 		},
 		{
 			input: func() *GraphQuery {
-				p := Node("p", "Person").Property("id", sql.Expr("?", 1))
+				p := Node("p", "Person").Property("id", 1)
 				a := Node("a", "Account")
 				e := Edge("e", "Transfers")
 				oa := Node("oa", "Account")
@@ -276,7 +276,7 @@ func TestBuilder(t *testing.T) {
 				src := Node("src", "Account")
 				dst := Node("dst", "Account")
 				transfer := EdgeL("Transfers")
-				subpath := From(NodeL("Account")).Via(transfer.Out()).To(Node("mid", "Account").Property("is_blocked", sql.Expr("?", true)))
+				subpath := From(NodeL("Account")).Via(transfer.Out()).To(Node("mid", "Account").Property("is_blocked", true))
 				lower := 1
 				upper := 2
 				return Graph("FinGraph").
@@ -315,7 +315,7 @@ func TestBuilder(t *testing.T) {
 		},
 		{
 			input: func() *GraphQuery {
-				p := Node("p").Labels("Person").Property("Name", sql.Expr("?", "Lee"))
+				p := Node("p").Labels("Person").Property("Name", "Lee")
 				a := Node("a").Labels("Account")
 				o := Edge("o").Labels("Owns")
 				match := Match(
