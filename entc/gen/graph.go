@@ -876,6 +876,7 @@ func (g *Graph) Views() (views []*schema.Table, err error) {
 	return
 }
 
+// FIXME: edge table names resolution
 // PropertyGraphs returns the schema definition of a property graph for the graph.
 func (g *Graph) PropertyGraphs() (pgs []*schema.PropertyGraph, err error) {
 	// Create a property graph for the entire schema if there are nodes
@@ -884,7 +885,7 @@ func (g *Graph) PropertyGraphs() (pgs []*schema.PropertyGraph, err error) {
 	}
 
 	// Create a property graph with a default name
-	graphName := "DefaultGraph"
+	graphName := "PropertyGraph"
 	pg := schema.NewPropertyGraph(graphName)
 
 	// Add node tables for all mutable nodes (exclude views and edge schemas)

@@ -2265,9 +2265,9 @@ func (e Edge) Index() (int, error) {
 
 func (e Edge) EdgeTableName() string {
 	if ant := e.Type.EntSQL(); ant != nil && ant.PascalCase {
-		return pascal(e.Name)
+		return pascal(e.Rel.Table)
 	}
-	return snake(e.Name)
+	return snake(e.Rel.Table)
 }
 
 // EdgeTableAlias returns the edge table alias in property graph.
