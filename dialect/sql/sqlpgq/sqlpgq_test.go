@@ -337,7 +337,7 @@ func TestBuilder(t *testing.T) {
 				dst := Node("dst").Labels("Account")
 				t1 := Edge("t1").Labels("Transfers")
 				t2 := Edge("t2").Labels("Transfers")
-				p := Assign("p", sql.ExprFunc(Paths(src.F(), t1.F(), mid.F(), t2.F(), dst.F())))
+				p := Assign("p", Paths(src.F(), t1.F(), mid.F(), t2.F(), dst.F()))
 				return Graph("FinGraph").
 					Match(
 						From(src).Via(t1.Out()).To(mid).Via(t2.Out()).To(dst),
