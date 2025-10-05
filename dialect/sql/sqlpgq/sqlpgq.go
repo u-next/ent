@@ -1626,129 +1626,107 @@ func PropertyExists(element, property string) *sql.Predicate {
 }
 
 // DestinationNodeID returns a new DESTINATION_NODE_ID function.
-func DestinationNodeID(edge string) func(*sql.Builder) {
-	return func(b *sql.Builder) {
-		b.WriteString("DESTINATION_NODE_ID(")
-		b.WriteString(edge)
-		b.WriteByte(')')
-	}
+func DestinationNodeID(edge string) *sql.Func {
+	f := &sql.Func{}
+	f.ByName("DESTINATION_NODE_ID", edge)
+	return f
 }
 
 // Edges returns a new EDGES function.
-func Edges(path string) func(*sql.Builder) {
-	return func(b *sql.Builder) {
-		b.WriteString("EDGES(")
-		b.WriteString(path)
-		b.WriteByte(')')
-	}
+func Edges(path string) *sql.Func {
+	f := &sql.Func{}
+	f.ByName("EDGES", path)
+	return f
 }
 
 // ElementID returns a new ELEMENT_ID function.
-func ElementID(element string) func(*sql.Builder) {
-	return func(b *sql.Builder) {
-		b.WriteString("ELEMENT_ID(")
-		b.WriteString(element)
-		b.WriteByte(')')
-	}
+func ElementID(element string) *sql.Func {
+	f := &sql.Func{}
+	f.ByName("ELEMENT_ID", element)
+	return f
 }
 
-// IsAcyclic returns a new IS_ACYCLIC function.
-func IsAcyclic(path string) func(*sql.Builder) {
-	return func(b *sql.Builder) {
+// IsAcyclic returns a new IS_ACYCLIC predicate.
+func IsAcyclic(path string) *sql.Predicate {
+	return sql.P(func(b *sql.Builder) {
 		b.WriteString("IS_ACYCLIC(")
 		b.WriteString(path)
 		b.WriteByte(')')
-	}
+	})
 }
 
-// IsSimple returns a new IS_SIMPLE function.
-func IsSimple(path string) func(*sql.Builder) {
-	return func(b *sql.Builder) {
+// IsSimple returns a new IS_SIMPLE predicate.
+func IsSimple(path string) *sql.Predicate {
+	return sql.P(func(b *sql.Builder) {
 		b.WriteString("IS_SIMPLE(")
 		b.WriteString(path)
 		b.WriteByte(')')
-	}
+	})
 }
 
-// IsTrail returns a new IS_TRAIL function.
-func IsTrail(path string) func(*sql.Builder) {
-	return func(b *sql.Builder) {
+// IsTrail returns a new IS_TRAIL predicate.
+func IsTrail(path string) *sql.Predicate {
+	return sql.P(func(b *sql.Builder) {
 		b.WriteString("IS_TRAIL(")
 		b.WriteString(path)
 		b.WriteByte(')')
-	}
+	})
 }
 
 // LabelsFunc returns a new LABELS function.
-func LabelsFunc(element string) func(*sql.Builder) {
-	return func(b *sql.Builder) {
-		b.WriteString("LABELS(")
-		b.WriteString(element)
-		b.WriteByte(')')
-	}
+func LabelsFunc(element string) *sql.Func {
+	f := &sql.Func{}
+	f.ByName("LABELS", element)
+	return f
 }
 
 // Nodes returns a new NODES function.
-func Nodes(path string) func(*sql.Builder) {
-	return func(b *sql.Builder) {
-		b.WriteString("NODES(")
-		b.WriteString(path)
-		b.WriteByte(')')
-	}
+func Nodes(path string) *sql.Func {
+	f := &sql.Func{}
+	f.ByName("NODES", path)
+	return f
 }
 
 // Paths returns a new PATH function.
-func Paths(elements ...string) func(*sql.Builder) {
-	return func(b *sql.Builder) {
-		b.WriteString("PATH(")
-		b.WriteString(strings.Join(elements, ", "))
-		b.WriteByte(')')
-	}
+func Paths(elements ...string) *sql.Func {
+	f := &sql.Func{}
+	f.ByName("PATH", elements...)
+	return f
 }
 
 // PathFirst returns a new PATH_FIRST function.
-func PathFirst(path string) func(*sql.Builder) {
-	return func(b *sql.Builder) {
-		b.WriteString("PATH_FIRST(")
-		b.WriteString(path)
-		b.WriteByte(')')
-	}
+func PathFirst(path string) *sql.Func {
+	f := &sql.Func{}
+	f.ByName("PATH_FIRST", path)
+	return f
 }
 
-// PathLast returns a new PATH_LAST function builder.
-func PathLast(path string) func(*sql.Builder) {
-	return func(b *sql.Builder) {
-		b.WriteString("PATH_LAST(")
-		b.WriteString(path)
-		b.WriteByte(')')
-	}
+// PathLast returns a new PATH_LAST function.
+func PathLast(path string) *sql.Func {
+	f := &sql.Func{}
+	f.ByName("PATH_LAST", path)
+	return f
 }
 
-// PathLength returns a new PATH_LENGTH function builder.
-func PathLength(path string) func(*sql.Builder) {
-	return func(b *sql.Builder) {
-		b.WriteString("PATH_LENGTH(")
-		b.WriteString(path)
-		b.WriteByte(')')
-	}
+// PathLength returns a new PATH_LENGTH function.
+func PathLength(path string) *sql.Func {
+	f := &sql.Func{}
+	f.ByName("PATH_LENGTH", path)
+	return f
 }
 
-// PropertyNames returns a new PROPERTY_NAMES function builder.
-func PropertyNames(element string) func(*sql.Builder) {
-	return func(b *sql.Builder) {
-		b.WriteString("PROPERTY_NAMES(")
-		b.WriteString(element)
-		b.WriteByte(')')
-	}
+// PropertyNames returns a new PROPERTY_NAMES function.
+func PropertyNames(element string) *sql.Func {
+	f := &sql.Func{}
+	f.ByName("PROPERTY_NAMES", element)
+	return f
 }
 
-// SourceNodeID returns a new SOURCE_NODE_ID function builder.
-func SourceNodeID(edge string) func(*sql.Builder) {
-	return func(b *sql.Builder) {
-		b.WriteString("SOURCE_NODE_ID(")
-		b.WriteString(edge)
-		b.WriteByte(')')
-	}
+// SourceNodeID returns a new SOURCE_NODE_ID function.
+func SourceNodeID(edge string) *sql.Func {
+	f := &sql.Func{}
+	f.ByName("SOURCE_NODE_ID", edge)
+	return f
 }
 
 // ArrayQuery returns an ARRAY expression for the given subquery.
