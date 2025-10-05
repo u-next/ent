@@ -102,21 +102,6 @@ func (g *GraphQuery) ReturnExprAs(expr sql.Querier, as string) *GraphQuery {
 	return g
 }
 
-// ReturnFuncAs adds a return expression built using the given function with an alias to the last RETURN statement.
-func (g *GraphQuery) ReturnFuncAs(f func(*sql.Builder), as string) *GraphQuery {
-	if len(g.stmts) == 0 {
-		return g.Append(Return().AppendItemFuncAs(f, as))
-	}
-	last := g.stmts[len(g.stmts)-1]
-	switch last := last.(type) {
-	case *ReturnBuilder:
-		last.AppendItemFuncAs(f, as)
-	default:
-		g.Append(Return().AppendItemFuncAs(f, as))
-	}
-	return g
-}
-
 // ReturnAs adds a return item with an alias to the last RETURN statement.
 func (g *GraphQuery) ReturnAs(it, as string) *GraphQuery {
 	if len(g.stmts) == 0 {
@@ -380,14 +365,6 @@ func (r *ReturnBuilder) AppendItemAs(it, as string) *ReturnBuilder {
 // AppendItemExprAs adds a return expression to the RETURN statement with the given alias.
 func (r *ReturnBuilder) AppendItemExprAs(expr sql.Querier, as string) *ReturnBuilder {
 	r.items = append(r.items, item{x: expr, as: as})
-	return r
-}
-
-// AppendItemFuncAs adds a return expression built using the given function to the RETURN statement with the given alias.
-func (r *ReturnBuilder) AppendItemFuncAs(f func(*sql.Builder), as string) *ReturnBuilder {
-	var b sql.Builder
-	f(&b)
-	r.items = append(r.items, item{x: &b, as: as})
 	return r
 }
 

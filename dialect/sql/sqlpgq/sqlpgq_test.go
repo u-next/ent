@@ -306,7 +306,7 @@ func TestBuilder(t *testing.T) {
 				return Graph("FinGraph").
 					Match(p, q).
 					Let(fullPath).
-					ReturnFuncAs(sqljson.ToJSON(fullPath.F()), "results")
+					ReturnExprAs(sql.ExprFunc(sqljson.ToJSON(fullPath.F())), "results")
 			}(),
 			wantQuery: "GRAPH `FinGraph`\n" +
 				"MATCH `p` = (`src`:`Account`)-[`t1`:`Transfers`]->(`mid`:`Account`), `q` = (`mid`:`Account`)-[`t2`:`Transfers`]->(`dst`:`Account`)\n" +
