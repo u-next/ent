@@ -270,9 +270,9 @@ func SchemaCmd() *cobra.Command {
 				if err != nil {
 					log.Fatalln(err)
 				}
-				var propertyGraphs []*schema.PropertyGraph
+				var pgs []*schema.PropertyGraph
 				if graph {
-					propertyGraphs, err = g.PropertyGraphs()
+					pgs, err = g.BuildPropertyGraphs()
 					if err != nil {
 						log.Fatalln(err)
 					}
@@ -282,7 +282,7 @@ func SchemaCmd() *cobra.Command {
 					Version:        version,
 					HashSymbols:    hashSymbols,
 					Tables:         append(t, v...),
-					PropertyGraphs: propertyGraphs,
+					PropertyGraphs: pgs,
 				})
 				if err != nil {
 					log.Fatalln(err)

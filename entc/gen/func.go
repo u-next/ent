@@ -558,9 +558,5 @@ func propertyGraphs(g *Graph) any {
 	if g == nil {
 		return nil
 	}
-	pg, err := g.PropertyGraphs()
-	if err != nil {
-		return nil
-	}
-	return pg
+	return g.PropertyGraphs
 }

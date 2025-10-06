@@ -108,6 +108,8 @@ type (
 		nodes map[string]*Type
 		// Schemas holds the raw interfaces for the loaded schemas.
 		Schemas []*load.Schema
+		// PropertyGraphs holds the property graphs derived from schema annotations.
+		PropertyGraphs []*schema.PropertyGraph
 	}
 
 	// Generator is the interface that wraps the Generate method.
@@ -184,6 +186,14 @@ func NewGraph(c *Config, schemas ...*load.Schema) (g *Graph, err error) {
 	if enabled, _ := g.Config.FeatureEnabled(FeatureGlobalID.Name); enabled {
 		if err := IncrementStartAnnotation(g); err != nil {
 			return nil, err
+		}
+	}
+	// Initialize PropertyGraphs for template access
+	if enabled, _ := g.Config.FeatureEnabled(FeaturePropertyGraph.Name); enabled {
+		if pgs, err := g.BuildPropertyGraphs(); err != nil {
+			return nil, err
+		} else {
+			g.PropertyGraphs = pgs
 		}
 	}
 	return
@@ -884,16 +894,27 @@ func (g *Graph) Views() (views []*schema.Table, err error) {
 	return
 }
 
-// FIXME: edge table names resolution
-// PropertyGraphs returns the schema definition of a property graph for the graph.
-func (g *Graph) PropertyGraphs() (pgs []*schema.PropertyGraph, err error) {
+// BuildPropertyGraphs returns the schema definition of a property graph for the graph.
+func (g *Graph) BuildPropertyGraphs() (pgs []*schema.PropertyGraph, err error) {
 	// Create a property graph for the entire schema if there are nodes
 	if len(g.Nodes) == 0 {
 		return nil, nil
 	}
 
-	// Create a property graph with a default name
-	graphName := "PropertyGraph"
+	// Find the first property graph annotation to use as the graph name
+	graphName := "property_graph" // default name
+	for _, n := range g.Nodes {
+		if ant := n.EntSQL(); ant != nil && ant.PropertyGraph != "" {
+			graphName = ant.PropertyGraph
+			// Apply PascalCase if annotation is present
+			if ant.PascalCase {
+				graphName = pascal(graphName)
+			}
+			break
+		}
+	}
+
+	// Create a single property graph with the found name
 	pg := schema.NewPropertyGraph(graphName)
 
 	// Add node tables for all mutable nodes (exclude views and edge schemas)

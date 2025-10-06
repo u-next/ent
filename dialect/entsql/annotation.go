@@ -200,6 +200,15 @@ type Annotation struct {
 	//	}
 	PascalCase bool `json:"pascal_case,omitempty"`
 
+	// PropertyGraph defines the property graph name for this schema.
+	// When specified, this schema defines a property graph that can be
+	// used for SQLPGQ queries.
+	//
+	//	entsql.Annotation{
+	//		PropertyGraph: "my_graph",
+	//	}
+	PropertyGraph string `json:"property_graph,omitempty"`
+
 	// error occurs during annotation build. This field is not
 	// serialized to JSON and used only by the codegen loader.
 	err error
@@ -310,6 +319,19 @@ func ViewFor(dialect string, as func(*sql.Selector)) *Annotation {
 func PascalCase() *Annotation {
 	return &Annotation{
 		PascalCase: true,
+	}
+}
+
+// PropertyGraph defines the property graph name for this schema.
+// When specified, this schema defines a property graph that can be
+// used for SQLPGQ queries.
+//
+//	entsql.Annotation{
+//		PropertyGraph: "my_graph",
+//	}
+func PropertyGraph(name string) *Annotation {
+	return &Annotation{
+		PropertyGraph: name,
 	}
 }
 
@@ -485,6 +507,9 @@ func (a Annotation) Merge(other schema.Annotation) schema.Annotation {
 		for dialect, view := range vf {
 			a.ViewFor[dialect] = view
 		}
+	}
+	if pg := ant.PropertyGraph; pg != "" {
+		a.PropertyGraph = pg
 	}
 	if ant.err != nil {
 		a.err = errors.Join(a.err, ant.err)
