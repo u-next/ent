@@ -485,7 +485,11 @@ func (g *Graph) resolve(t *Type) error {
 
 			case !a && !b:
 				e.Rel.Type, ref.Rel.Type = M2M, M2M
-				table = e.Type.Label() + "_" + ref.Name
+				if ant := e.Type.EntSQL(); ant != nil && ant.PascalCase {
+					table = e.Type.Table() + pascal(ref.Name)
+				} else {
+					table = e.Type.Label() + "_" + ref.Name
+				}
 				c1, c2 := ref.Owner.Label()+"_id", ref.Type.Label()+"_id"
 				// If the relation is from the same type: User has Friends ([]User),
 				// we give the second column a different name (the relation name).
@@ -508,7 +512,11 @@ func (g *Graph) resolve(t *Type) error {
 			case !e.Unique && e.Type == t:
 				e.Rel.Type = M2M
 				e.Bidi = true
-				e.Rel.Table = t.Label() + "_" + e.Name
+				if ant := e.Owner.EntSQL(); ant != nil && ant.PascalCase {
+					e.Rel.Table = e.Owner.Table() + pascal(e.Name)
+				} else {
+					e.Rel.Table = t.Label() + "_" + e.Name
+				}
 				e.Rel.Columns = []string{e.Owner.Label() + "_id", rules.Singularize(e.Name) + "_id"}
 			case e.Unique && e.Type == t:
 				e.Rel.Type = O2O
@@ -1169,13 +1177,16 @@ func fkSymbol(e *Edge, ownerT, refT *schema.Table) string {
 	if k, _ := e.StorageKey(); k != nil && len(k.Symbols) == 1 {
 		return k.Symbols[0]
 	}
-	return fmt.Sprintf("%s_%s_%s", ownerT.Name, refT.Name, e.Name)
+	// Use snake_case version of table names for constraint names
+	return fmt.Sprintf("%s_%s_%s", snake(ownerT.Name), snake(refT.Name), e.Name)
 }
 
 // fkSymbols is like fkSymbol but for M2M edges.
 func fkSymbols(e *Edge, c1, c2 *schema.Column) (string, string) {
-	s1 := fmt.Sprintf("%s_%s", e.Rel.Table, c1.Name)
-	s2 := fmt.Sprintf("%s_%s", e.Rel.Table, c2.Name)
+	// Use snake_case version of table name for constraint names
+	tableName := snake(e.Rel.Table)
+	s1 := fmt.Sprintf("%s_%s", tableName, c1.Name)
+	s2 := fmt.Sprintf("%s_%s", tableName, c2.Name)
 	if k, _ := e.StorageKey(); k != nil {
 		if len(k.Symbols) > 0 {
 			s1 = k.Symbols[0]
