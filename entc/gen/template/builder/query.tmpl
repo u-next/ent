@@ -42,6 +42,11 @@ type {{ $builder }} struct {
 // Where adds a new predicate for the {{ $builder }} builder.
 func ({{ $receiver }} *{{ $builder }}) Where(ps ...predicate.{{ $.Name }}) *{{ $builder }} {
 	{{ $receiver}}.predicates = append({{ $receiver }}.predicates, ps...)
+	{{- with $tmpls := matchTemplate "dialect/sql/query/Where/*" }}
+		{{- range $tmpl := $tmpls }}
+			{{- xtemplate $tmpl $ }}
+		{{- end }}
+	{{- end }}
 	return {{ $receiver }}
 }
 
@@ -196,6 +201,11 @@ func ({{ $receiver }} *{{ $builder }}) OnlyX(ctx context.Context) *{{ $.Name }} 
 
 // All executes the query and returns a list of {{ plural $.Name }}.
 func ({{ $receiver }} *{{ $builder }}) All(ctx context.Context) ([]*{{ $.Name }}, error) {
+	{{- with $tmpls := matchTemplate "dialect/sql/query/All/*" }}
+		{{- range $tmpl := $tmpls }}
+			{{- xtemplate $tmpl $ }}
+		{{- end }}
+	{{- end }}
 	ctx = setContextOp(ctx, {{ $receiver }}.ctx, ent.OpQueryAll)
 	if err := {{ $receiver }}.prepareQuery(ctx); err != nil {
 		return nil, err
@@ -239,6 +249,11 @@ func ({{ $receiver }} *{{ $builder }}) AllX(ctx context.Context) []*{{ $.Name }}
 
 // Count returns the count of the given query.
 func ({{ $receiver }} *{{ $builder }}) Count(ctx context.Context) (int, error) {
+	{{- with $tmpls := matchTemplate "dialect/sql/query/Count/*" }}
+		{{- range $tmpl := $tmpls }}
+			{{- xtemplate $tmpl $ }}
+		{{- end }}
+	{{- end }}
 	ctx = setContextOp(ctx, {{ $receiver }}.ctx, ent.OpQueryCount)
 	if err := {{ $receiver }}.prepareQuery(ctx); err != nil {
 		return 0, err

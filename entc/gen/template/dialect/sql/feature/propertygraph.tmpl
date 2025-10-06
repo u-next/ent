@@ -11,6 +11,7 @@ in the LICENSE file in the root directory of this source tree.
 
 {{ define "dialect/sql/import/additional/propertygraph" }}
 	{{- if $.FeatureEnabled "sql/propertygraph" }}
+		"strings"
 		"entgo.io/ent/dialect/sql/sqlpgq"
 	{{- end }}
 {{ end }}
@@ -19,6 +20,18 @@ in the LICENSE file in the root directory of this source tree.
 	{{- if $.FeatureEnabled "sql/propertygraph" }}
 		// pgMode holds the property graph execution mode for this query
 		pgMode *PropertyGraphMode
+		// pgPredicates holds property graph predicate metadata for conversion
+		pgPredicates []*PropertyGraphPredicate
+	{{- end }}
+{{ end }}
+
+{{/* Extension to modify the Where() method to be property graph-aware */}}
+{{ define "dialect/sql/query/Where/propertygraph" }}
+	{{- if $.FeatureEnabled "sql/propertygraph" }}
+		// If in property graph mode, extract predicate metadata for property graph conversion
+		if {{ $.QueryReceiver }}.pgMode != nil && {{ $.QueryReceiver }}.pgMode.enabled {
+			{{ $.QueryReceiver }}.extractPropertyGraphPredicates(ps...)
+		}
 	{{- end }}
 {{ end }}
 
@@ -27,6 +40,55 @@ in the LICENSE file in the root directory of this source tree.
 		{{ $pkg := base $.Config.Package }}
 		{{ $builder := $.QueryName }}
 		{{ $receiver := $.QueryReceiver }}
+
+		// extractPropertyGraphPredicates extracts metadata from predicates for property graph queries.
+		// This is called automatically when Where() is used in property graph mode.
+		func ({{ $receiver }} *{{ $builder }}) extractPropertyGraphPredicates(ps ...predicate.{{ $.Name }}) {
+			// For each predicate, we'll try to identify known patterns and extract metadata
+			// This approach is much simpler than parsing SQL strings
+			
+			// Create a dummy selector to capture the predicate effects
+			sel := sql.Select().From(sql.Table({{ $.Package }}.Table))
+			for _, p := range ps {
+				p(sel)
+			}
+			
+			// Extract WHERE clause for simple parsing
+			if where := sel.P(); where != nil {
+				{{ $receiver }}.parseSimplePredicates(where)
+			}
+		}
+
+		// parseSimplePredicates handles basic equality predicates for property graphs.
+		// This is much simpler than the previous approach - just handles common cases.
+		func ({{ $receiver }} *{{ $builder }}) parseSimplePredicates(where *sql.Predicate) {
+			query, args := where.Query()
+			
+			// Handle single-argument equality predicates (most common case)
+			if len(args) == 1 {
+				{{- range $f := $.Fields }}
+				// Check for {{ $f.Name }} field
+				if strings.Contains(query, "`{{ $f.StorageKey }}`") {
+					{{ $receiver }}.pgPredicates = append({{ $receiver }}.pgPredicates, &PropertyGraphPredicate{
+						Field:     {{ printf "%q" $f.StorageKey }},
+						Operation: "eq",
+						Value:     args[0],
+					})
+				}
+				{{- end }}
+				
+				{{ if $.HasOneFieldID }}
+				// Handle ID field specifically (most common case)
+				if strings.Contains(query, "`{{ $.ID.StorageKey }}`") || strings.Contains(query, "`id`") {
+					{{ $receiver }}.pgPredicates = append({{ $receiver }}.pgPredicates, &PropertyGraphPredicate{
+						Field:     {{ printf "%q" $.ID.StorageKey }},
+						Operation: "eq", 
+						Value:     args[0],
+					})
+				}
+				{{ end }}
+			}
+		}
 
 		// pgqAll executes the property graph query and returns a list of {{ $.Name }} entities.
 		func ({{ $receiver }} *{{ $builder }}) pgqAll(ctx context.Context) ([]*{{ $.Name }}, error) {
@@ -72,15 +134,14 @@ in the LICENSE file in the root directory of this source tree.
 			}
 			
 			// Build count-specific query - don't reuse buildPGQ to avoid entity columns
-			query := sqlpgq.Graph({{ $receiver }}.pgMode.graphName).
-				Match(sqlpgq.Node("n1").Labels({{ $.Package }}.Label))
+			node := sqlpgq.Node("n1").Labels({{ printf "%q" $.Name }})
 			
-			// Apply predicates - convert SQL predicates to property graph conditions
-			for _, p := range {{ $receiver }}.predicates {
-				// For now, we'll need to adapt SQL predicates to property graph
-				// This is a simplified approach - real implementation would need predicate conversion
-				_ = p
+			// Apply predicates to count query as well
+			if len({{ $receiver }}.predicates) > 0 {
+				node = {{ $receiver }}.applyPredicatesToNode(node)
 			}
+			
+			query := sqlpgq.Graph({{ $receiver }}.pgMode.graphName).Match(node)
 			
 			// Apply limit and offset
 			if {{ $receiver }}.ctx != nil {
@@ -121,15 +182,15 @@ in the LICENSE file in the root directory of this source tree.
 			}
 			
 			// Start with the graph and match the entity node
-			query := sqlpgq.Graph({{ $receiver }}.pgMode.graphName).
-				Match(sqlpgq.Node("n1").Labels({{ $.Package }}.Label))
+			node := sqlpgq.Node("n1").Labels({{ printf "%q" $.Name }})
 			
 			// Apply predicates - convert SQL predicates to property graph conditions
-			for _, p := range {{ $receiver }}.predicates {
-				// For now, we'll need to adapt SQL predicates to property graph
-				// This is a simplified approach - real implementation would need predicate conversion
-				_ = p
+			if len({{ $receiver }}.predicates) > 0 {
+				// Convert SQL predicates to property graph node properties
+				node = {{ $receiver }}.applyPredicatesToNode(node)
 			}
+			
+			query := sqlpgq.Graph({{ $receiver }}.pgMode.graphName).Match(node)
 			
 			// Apply ordering
 			if len({{ $receiver }}.order) > 0 {
@@ -157,17 +218,31 @@ in the LICENSE file in the root directory of this source tree.
 			return query
 		}
 
+		// applyPredicatesToNode applies property graph predicates to the node.
+		func ({{ $receiver }} *{{ $builder }}) applyPredicatesToNode(node *sqlpgq.NodePattern) *sqlpgq.NodePattern {
+			// Apply property graph predicates that were captured during Where() calls
+			for _, pgPred := range {{ $receiver }}.pgPredicates {
+				switch pgPred.Operation {
+				case "eq":
+					node = node.Property(pgPred.Field, pgPred.Value)
+				// TODO: Add support for other operations like neq, in, gt, etc.
+				// For now, we only support equality predicates in property graphs
+				}
+			}
+			return node
+		}
+
 		// pgqLoadEdges applies eager loading to the property graph query.
 		func ({{ $receiver }} *{{ $builder }}) pgqLoadEdges(query *sqlpgq.GraphQuery) {
 			{{- range $e := $.Edges }}
 				if {{ $receiver }}.{{ $e.EagerLoadField }} != nil {
 					// Add edge pattern for {{ $e.Name }}
 					{{- if $e.Bidi }}
-						query.Match(sqlpgq.From(sqlpgq.Node("n1")).Via(sqlpgq.Edge("e{{ $e.Index }}", "{{ $e.Label }}")).To(sqlpgq.Node("n{{ add $e.Index 2 }}").Labels({{ $e.Type.Package }}.Label)))
+						query.Match(sqlpgq.From(sqlpgq.Node("n1")).Via(sqlpgq.Edge("e{{ $e.Index }}", "{{ $e.Label }}")).To(sqlpgq.Node("n{{ add $e.Index 2 }}").Labels({{ printf "%q" $e.Type.Name }})))
 					{{- else if $e.IsInverse }}
 						query.Match(sqlpgq.From(sqlpgq.Node("n{{ add $e.Index 2 }}")).Via(sqlpgq.Edge("e{{ $e.Index }}", "{{ $e.Label }}")).To(sqlpgq.Node("n1")))
 					{{- else }}
-						query.Match(sqlpgq.From(sqlpgq.Node("n1")).Via(sqlpgq.Edge("e{{ $e.Index }}", "{{ $e.Label }}")).To(sqlpgq.Node("n{{ add $e.Index 2 }}").Labels({{ $e.Type.Package }}.Label)))
+						query.Match(sqlpgq.From(sqlpgq.Node("n1")).Via(sqlpgq.Edge("e{{ $e.Index }}", "{{ $e.Label }}")).To(sqlpgq.Node("n{{ add $e.Index 2 }}").Labels({{ printf "%q" $e.Type.Name }})))
 					{{- end }}
 				}
 			{{- end }}
@@ -199,6 +274,7 @@ in the LICENSE file in the root directory of this source tree.
 {{ define "dialect/sql/query/Clone/propertygraph" }}
 	{{- if $.FeatureEnabled "sql/propertygraph" }}
 		pgMode: {{ $.QueryReceiver }}.pgMode,
+		pgPredicates: append([]*PropertyGraphPredicate{}, {{ $.QueryReceiver }}.pgPredicates...),
 	{{- end }}
 {{ end }}
 
@@ -225,6 +301,13 @@ in the LICENSE file in the root directory of this source tree.
 		type PropertyGraphMode struct {
 			graphName string
 			enabled   bool
+		}
+
+		// PropertyGraphPredicate holds metadata for property graph predicate conversion
+		type PropertyGraphPredicate struct {
+			Field     string      // field name
+			Operation string      // operation type (eq, neq, in, etc.)
+			Value     interface{} // predicate value
 		}
 
 		{{- /* Generate property graph clients based on the property graphs in the schema */}}
@@ -261,7 +344,7 @@ in the LICENSE file in the root directory of this source tree.
 					func (c *{{ $graphName }}Client) Get{{ $n.Name }}(ctx context.Context, id {{ $n.ID.Type }}) (*{{ $n.Name }}, error) {
 						// Build property graph query with label and ID condition: (n:Label {field: value})
 						pgq := sqlpgq.Graph({{ printf "%q" $pg.Name }}).
-							Match(sqlpgq.Node("n1").Labels({{ $n.Package }}.Label).Property({{ printf "%q" $n.ID.Name }}, id)).
+							Match(sqlpgq.Node("n1").Labels({{ printf "%q" $n.Name }}).Property({{ printf "%q" $n.ID.Name }}, id)).
 							Return({{- range $i, $f := $n.Fields -}}{{- if ne $i 0 }}, {{ end -}}"n1.{{ $f.StorageKey }}"{{- end -}})
 						
 						// Execute the query
