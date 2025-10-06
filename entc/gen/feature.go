@@ -159,12 +159,12 @@ var (
 		},
 	}
 
-	// TODO: implement the GQL in SQL feature.
-	FeatureGQLCompat = Feature{
-		Name:        "sql/gqlcompat",
+	// FeaturePropertyGraph provides a feature-flag for property graph queries.
+	FeaturePropertyGraph = Feature{
+		Name:        "sql/propertygraph",
 		Stage:       Experimental,
 		Default:     false,
-		Description: "Allows users to embed GQL queries inside SQL queries using the GRAPH_TABLE operator",
+		Description: "Allows users to query and manage property graphs using SQL/PGQ syntax",
 	}
 
 	// TODO: implement the full-text search feature.
@@ -190,7 +190,7 @@ var (
 		FeatureUpsert,
 		FeatureVersionedMigration,
 		FeatureGlobalID,
-		FeatureGQLCompat,
+		FeaturePropertyGraph,
 		FeatureFullTextSearch,
 	}
 	// allFeatures includes all public and private features.

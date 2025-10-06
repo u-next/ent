@@ -40,6 +40,11 @@ func (c *Client) init() {
 	{{- range $n := $.Nodes }}
     	c.{{ $n.Name }} = New{{ $n.ClientName }}(c.config)
 	{{- end }}
+	{{- with $tmpls := matchTemplate "client/init/additional/*" }}
+		{{- range $tmpl := $tmpls }}
+			{{- xtemplate $tmpl $ }}
+		{{- end }}
+	{{- end }}
 }
 {{ end }}
 
