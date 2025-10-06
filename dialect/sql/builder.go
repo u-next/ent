@@ -1613,10 +1613,18 @@ type CaseBuilder struct {
 	els   Querier
 }
 
-// Case returns a new CaseBuilder.
+func Case(column string) *CaseBuilder {
+	ident := ExprFunc(func(b *Builder) {
+		b.Ident(column)
+	})
+	c := &CaseBuilder{expr: ident}
+	return c
+}
+
+// CaseP returns a new CaseBuilder.
 //
-//	sql.Case().When(predicate, result)
-func Case() *CaseBuilder {
+//	sql.CaseP().When(predicate, result)
+func CaseP() *CaseBuilder {
 	c := &CaseBuilder{}
 	return c
 }

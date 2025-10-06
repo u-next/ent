@@ -2390,3 +2390,158 @@ func TestColumnsHasPrefix(t *testing.T) {
 		require.Equal(t, []any{`\`}, args)
 	})
 }
+
+func TestConditionalExpressions(t *testing.T) {
+	t.Run("Case", func(t *testing.T) {
+		t.Run("MySQL", func(t *testing.T) {
+			// CASE WHEN expression
+			query, args := Dialect(dialect.MySQL).
+				Select().
+				SelectExpr(CaseP().When(EQ("status", "active"), "1").Else(V("0"))).
+				From(Table("users")).
+				Query()
+			require.Equal(t, "SELECT CASE WHEN `status` = ? THEN `1` ELSE ? END FROM `users`", query)
+			require.Equal(t, []any{"active", "0"}, args)
+
+			// CASE expression with column
+			query, args = Dialect(dialect.MySQL).
+				Select().
+				SelectExpr(Case("status").
+					WhenMatch("active", "status_text").
+					WhenMatch("inactive", "status_text").
+					Else(V("unknown"))).
+				From(Table("users")).
+				Query()
+			require.Equal(t, "SELECT CASE `status` WHEN ? THEN `status_text` WHEN ? THEN `status_text` ELSE ? END FROM `users`", query)
+			require.Equal(t, []any{"active", "inactive", "unknown"}, args)
+		})
+
+		t.Run("Postgres", func(t *testing.T) {
+			query, args := Dialect(dialect.Postgres).
+				Select().
+				SelectExpr(CaseP().When(EQ("status", "active"), "1").Else(V("0"))).
+				From(Table("users")).
+				Query()
+			require.Equal(t, `SELECT CASE WHEN "status" = $1 THEN "1" ELSE $2 END FROM "users"`, query)
+			require.Equal(t, []any{"active", "0"}, args)
+		})
+
+		t.Run("SQLite", func(t *testing.T) {
+			query, args := Dialect(dialect.SQLite).
+				Select().
+				SelectExpr(CaseP().When(EQ("status", "active"), "1").Else(V("0"))).
+				From(Table("users")).
+				Query()
+			require.Equal(t, "SELECT CASE WHEN `status` = ? THEN `1` ELSE ? END FROM `users`", query)
+			require.Equal(t, []any{"active", "0"}, args)
+		})
+
+		t.Run("Spanner", func(t *testing.T) {
+			query, args := Dialect(dialect.Spanner).
+				Select().
+				SelectExpr(CaseP().When(EQ("status", "active"), "1").Else(V("0"))).
+				From(Table("users")).
+				Query()
+			require.Equal(t, "SELECT CASE WHEN `status` = ? THEN `1` ELSE ? END FROM `users`", query)
+			require.Equal(t, []any{"active", "0"}, args)
+		})
+	})
+
+	t.Run("NullIf", func(t *testing.T) {
+		// NullIf is SQL standard and should work across all dialects
+		t.Run("MySQL", func(t *testing.T) {
+			query, args := Dialect(dialect.MySQL).
+				Select().
+				Select(NullIf("`name`", "`empty`")).
+				From(Table("users")).
+				Query()
+			require.Equal(t, "SELECT NULLIF(`name`, `empty`) FROM `users`", query)
+			require.Empty(t, args)
+		})
+
+		t.Run("Postgres", func(t *testing.T) {
+			query, args := Dialect(dialect.Postgres).
+				Select().
+				Select(NullIf(`"name"`, `"empty"`)).
+				From(Table("users")).
+				Query()
+			require.Equal(t, "SELECT NULLIF(\"name\", \"empty\") FROM \"users\"", query)
+			require.Empty(t, args)
+		})
+
+		t.Run("SQLite", func(t *testing.T) {
+			query, args := Dialect(dialect.SQLite).
+				Select().
+				Select(NullIf("`name`", "`empty`")).
+				From(Table("users")).
+				Query()
+			require.Equal(t, "SELECT NULLIF(`name`, `empty`) FROM `users`", query)
+			require.Empty(t, args)
+		})
+
+		t.Run("Spanner", func(t *testing.T) {
+			query, args := Dialect(dialect.Spanner).
+				Select().
+				Select(NullIf("`name`", "`empty`")).
+				From(Table("users")).
+				Query()
+			require.Equal(t, "SELECT NULLIF(`name`, `empty`) FROM `users`", query)
+			require.Empty(t, args)
+		})
+	})
+
+	t.Run("Coalesce", func(t *testing.T) {
+		// Coalesce is SQL standard and should work across all dialects
+		t.Run("MySQL", func(t *testing.T) {
+			query, args := Dialect(dialect.MySQL).
+				Select().
+				Select(Coalesce("`first_name`", "`last_name`", "`unknown`")).
+				From(Table("users")).
+				Query()
+			require.Equal(t, "SELECT COALESCE(`first_name`, `last_name`, `unknown`) FROM `users`", query)
+			require.Empty(t, args)
+		})
+
+		t.Run("Postgres", func(t *testing.T) {
+			query, args := Dialect(dialect.Postgres).
+				Select().
+				Select(Coalesce(`"first_name"`, `"last_name"`, `"unknown"`)).
+				From(Table("users")).
+				Query()
+			require.Equal(t, "SELECT COALESCE(\"first_name\", \"last_name\", \"unknown\") FROM \"users\"", query)
+			require.Empty(t, args)
+		})
+
+		t.Run("SQLite", func(t *testing.T) {
+			query, args := Dialect(dialect.SQLite).
+				Select().
+				Select(Coalesce("`first_name`", "`last_name`", "`unknown`")).
+				From(Table("users")).
+				Query()
+			require.Equal(t, "SELECT COALESCE(`first_name`, `last_name`, `unknown`) FROM `users`", query)
+			require.Empty(t, args)
+		})
+
+		t.Run("Spanner", func(t *testing.T) {
+			query, args := Dialect(dialect.Spanner).
+				Select().
+				Select(Coalesce("`first_name`", "`last_name`", "`unknown`")).
+				From(Table("users")).
+				Query()
+			require.Equal(t, "SELECT COALESCE(`first_name`, `last_name`, `unknown`) FROM `users`", query)
+			require.Empty(t, args)
+		})
+	})
+
+	t.Run("ConditionalWithSubquery", func(t *testing.T) {
+		query, args := Dialect(dialect.MySQL).
+			Select("name").
+			SelectExpr(CaseP().
+				WhenExpr(GT("order_count", Select("COUNT(*)").From(Table("orders")).Where(EQ("user_id", Raw("users.id")))), V("customer")).
+				Else(V("prospect"))).
+			From(Table("users")).
+			Query()
+		require.Equal(t, "SELECT CASE WHEN `order_count` > (SELECT COUNT(*) FROM `orders` WHERE `user_id` = users.id) THEN ? ELSE ? END FROM `users`", query)
+		require.Equal(t, []any{"customer", "prospect"}, args)
+	})
+}
