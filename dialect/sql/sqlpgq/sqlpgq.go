@@ -939,6 +939,13 @@ func (g *GraphPatternBuilder) AppendPatterns(patterns ...Pattern) *GraphPatternB
 	return g
 }
 
+func (g *GraphPatternBuilder) Where(pred *sql.Predicate) *GraphPatternBuilder {
+	if g.where == nil {
+		g.where = pred
+	}
+	return g
+}
+
 func (w *GraphPatternBuilder) Query() (string, []any) {
 	w.JoinComma(w.patterns...)
 	w.NewLine()
