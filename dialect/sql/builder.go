@@ -3222,12 +3222,12 @@ func (b *Builder) Quote(ident string) string {
 func (b *Builder) Ident(s string) *Builder {
 	switch {
 	case len(s) == 0:
-	case !strings.HasSuffix(s, "*") && !b.IsIdent(s) && !isFunc(s) && !isModifier(s) && !isAlias(s):
+	case !strings.HasSuffix(s, "*") && !b.IsIdent(s) && !IsFunc(s) && !IsModifier(s) && !IsAlias(s):
 		if b.qualifier != "" {
 			b.WriteString(b.Quote(b.qualifier)).WriteByte('.')
 		}
 		b.WriteString(b.Quote(s))
-	case (isFunc(s) || isModifier(s) || isAlias(s)) && b.Postgres():
+	case (IsFunc(s) || IsModifier(s) || IsAlias(s)) && b.Postgres():
 		// Modifiers and aggregation functions that
 		// were called without dialect information.
 		b.WriteString(strings.ReplaceAll(s, "`", `"`))
@@ -3845,15 +3845,15 @@ func (d *DialectBuilder) With(name string) *WithBuilder {
 	return b
 }
 
-func isAlias(s string) bool {
+func IsAlias(s string) bool {
 	return strings.Contains(s, " AS ") || strings.Contains(s, " as ")
 }
 
-func isFunc(s string) bool {
+func IsFunc(s string) bool {
 	return strings.Contains(s, "(") && strings.Contains(s, ")")
 }
 
-func isModifier(s string) bool {
+func IsModifier(s string) bool {
 	for _, m := range [...]string{"DISTINCT", "ALL", "WITH ROLLUP"} {
 		if strings.HasPrefix(s, m) {
 			return true

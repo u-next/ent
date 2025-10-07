@@ -32,7 +32,7 @@ func (h Hint[HintKey]) Write(b *sql.Builder) {
 				b.Comma()
 			}
 			var val string
-			switch v := any(v).(type) {
+			switch v := v.(type) {
 			case bool:
 				val = strings.ToUpper(fmt.Sprintf("%t", v))
 			case string:

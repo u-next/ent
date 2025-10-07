@@ -382,7 +382,7 @@ func orderByAgg(fn, field string, opts ...OrderTermOption) *OrderExprTerm {
 		Expr: func(s *Selector) Querier {
 			var c string
 			switch {
-			case field == "*", isFunc(field):
+			case field == "*", IsFunc(field):
 				c = field
 			default:
 				c = s.C(field)
