@@ -321,6 +321,11 @@ in the LICENSE file in the root directory of this source tree.
 					config
 				}
 
+				// New{{ $graphName }}Client returns a client for the {{ $graphName }} from the given config.
+				func New{{ $graphName }}Client(c config) *{{ $graphName }}Client {
+					return &{{ $graphName }}Client{config: c}
+				}
+
 				{{- range $n := $.Nodes }}
 
 					// Query{{ $n.Name }} returns a query builder for {{ $n.Name }} entities using property graph syntax.
@@ -384,23 +389,18 @@ in the LICENSE file in the root directory of this source tree.
 				{{- end }}
 
 			{{- end }}
-
-			// initPropertyGraphClients initializes the property graph clients.
-			func (c *Client) initPropertyGraphClients() {
-				{{- range $pg := $.PropertyGraphs }}
-					{{ $graphName := pascal $pg.Name }}
-					c.{{ $graphName }} = &{{ $graphName }}Client{config: c.config}
-				{{- end }}
-			}
 		{{- else }}
 			{{- /* No property graphs defined */}}
 		{{- end }}
 	{{- end }}
 {{ end }}
 
-{{ define "client/init/additional/propertygraph" }}
+{{- define "client/init/additional/propertygraph" }}
 	{{- if $.FeatureEnabled "sql/propertygraph" }}
-		// Initialize property graph clients
-		c.initPropertyGraphClients()
-	{{- end }}
-{{ end }}
+		{{- if $.PropertyGraphs }}
+			{{- range $pg := $.PropertyGraphs }}
+	c.{{ pascal $pg.Name }} = New{{ pascal $pg.Name }}Client(c.config)
+			{{- end }}
+		{{- end }}
+	{{- end -}}
+{{- end }}
