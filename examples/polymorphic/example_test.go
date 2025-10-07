@@ -186,7 +186,6 @@ func TestPolymorphicEdgePropertyGraph(t *testing.T) {
 	// Create the graph
 	graph, err := gen.NewGraph(&gen.Config{
 		Package: "test/polymorphic",
-		Storage: &gen.Storage{Name: "sql"},
 	}, mediaSchema, trailerSchema, audioConsumableSchema)
 
 	if err != nil {
@@ -194,7 +193,7 @@ func TestPolymorphicEdgePropertyGraph(t *testing.T) {
 	}
 
 	// Generate property graph
-	pgs, err := graph.PropertyGraphs()
+	pgs, err := graph.BuildPropertyGraphs()
 	if err != nil {
 		t.Fatalf("Failed generating property graph: %v", err)
 	}

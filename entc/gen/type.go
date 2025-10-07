@@ -2264,6 +2264,12 @@ func (e Edge) Index() (int, error) {
 }
 
 func (e Edge) EdgeTableName() string {
+	if e.IsPolymorphic {
+		if e.Owner != nil {
+			return e.Owner.Table()
+		}
+	}
+
 	if ant := e.Type.EntSQL(); ant != nil && ant.PascalCase {
 		return pascal(e.Rel.Table)
 	}
@@ -2272,6 +2278,15 @@ func (e Edge) EdgeTableName() string {
 
 // EdgeTableAlias returns the edge table alias in property graph.
 func (e Edge) EdgeTableAlias() string {
+	if e.IsPolymorphic {
+		if e.Owner != nil {
+			if ant := e.Owner.EntSQL(); ant != nil && ant.PascalCase {
+				return e.Owner.Table() + pascal(e.Name)
+			}
+			return e.Owner.Table() + "_" + snake(e.Name)
+		}
+	}
+
 	if e.IsInverse() {
 		if ant := e.Type.EntSQL(); ant != nil && ant.PascalCase {
 			return e.Ref.Type.Table() + pascal(e.Name)

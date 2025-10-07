@@ -6,6 +6,7 @@ package edge
 
 import (
 	"reflect"
+	"strings"
 
 	"entgo.io/ent/schema"
 )
@@ -227,45 +228,120 @@ func (b *inverseBuilder) Descriptor() *Descriptor {
 	return b.desc
 }
 
-// polymorphicAssocBuilder is the builder for polymorphic association edges.
-type polymorphicAssocBuilder struct {
-	desc *Descriptor
+// polymorphicTypeEntry represents a single type mapping in a polymorphic edge.
+type polymorphicTypeEntry struct {
+	TypeName  string
+	TypeValue any
+	FieldName string
 }
 
-// PolyTo creates a polymorphic association edge that can connect to multiple target types.
+// polymorphicAssocBuilder is the builder for polymorphic association edges using ToOneOf/FromOneOf pattern.
+type polymorphicAssocBuilder struct {
+	desc    *Descriptor
+	entries []polymorphicTypeEntry
+}
+
+// ToOneOf creates a polymorphic association edge using type-value pairs.
 //
-//	edge.PolyTo("entity", Media.Type, MediaEpisode.Type, Trailer.Type).
-//		TypeField("entity_type").
-//		Field("entity_nid").
-//		Required()
-func PolyTo(name string, allowedTypes ...any) *polymorphicAssocBuilder {
-	typeNames := make([]string, len(allowedTypes))
-	for i, t := range allowedTypes {
-		typeNames[i] = typ(t)
+//	edge.ToOneOf(
+//		"message_type",
+//		"text_message", TextMessage.Type,
+//		"photo_message", PhotoMessage.Type,
+//	)
+func ToOneOf(discriminatorField string, typeValuePairs ...any) *polymorphicAssocBuilder {
+	if len(typeValuePairs)%2 != 0 {
+		panic("ToOneOf requires an even number of arguments (type-value pairs)")
+	}
+
+	entries := make([]polymorphicTypeEntry, 0, len(typeValuePairs)/2)
+	typeNames := make([]string, 0, len(typeValuePairs)/2)
+
+	for i := 0; i < len(typeValuePairs); i += 2 {
+		typeName, ok := typeValuePairs[i].(string)
+		if !ok {
+			panic("ToOneOf: type name must be a string")
+		}
+		typeValue := typeValuePairs[i+1]
+
+		entries = append(entries, polymorphicTypeEntry{
+			TypeName:  typeName,
+			TypeValue: typeValue,
+			FieldName: typeName + "_id", // Default field name
+		})
+		typeNames = append(typeNames, typ(typeValue))
+	}
+
+	// Infer field name from discriminator field (remove _type suffix and add _id)
+	fieldName := discriminatorField
+	if strings.HasSuffix(fieldName, "_type") {
+		fieldName = strings.TrimSuffix(fieldName, "_type") + "_id"
+	} else {
+		fieldName = fieldName + "_id"
 	}
 
 	return &polymorphicAssocBuilder{
 		desc: &Descriptor{
-			Name:          name,
-			Type:          "polymorphic", // Special type marker
-			AllowedTypes:  typeNames,
-			IsPolymorphic: true,
+			Name:                   discriminatorField,
+			Type:                   "polymorphic",
+			Field:                  fieldName,
+			AllowedTypes:           typeNames,
+			TypeDiscriminatorField: discriminatorField,
+			IsPolymorphic:          true,
 		},
+		entries: entries,
 	}
 }
 
-// TypeField specifies the field that stores the entity type discriminator.
-// This field should be a string field in your schema.
-func (b *polymorphicAssocBuilder) TypeField(field string) *polymorphicAssocBuilder {
-	b.desc.TypeDiscriminatorField = field
-	return b
-}
+// FromOneOf creates a polymorphic inverse edge using type-value pairs.
+//
+//	edge.FromOneOf(
+//		"owner_user_type",
+//		"local_user", LocalUser.Type,
+//		"foreign_user", ForeignUser.Type,
+//	).Unique()
+func FromOneOf(discriminatorField string, typeValuePairs ...any) *polymorphicInverseBuilder {
+	if len(typeValuePairs)%2 != 0 {
+		panic("FromOneOf requires an even number of arguments (type-value pairs)")
+	}
 
-// Field specifies the field that stores the polymorphic foreign key.
-// This field should match the ID type of your target entities.
-func (b *polymorphicAssocBuilder) Field(field string) *polymorphicAssocBuilder {
-	b.desc.Field = field
-	return b
+	entries := make([]polymorphicTypeEntry, 0, len(typeValuePairs)/2)
+	typeNames := make([]string, 0, len(typeValuePairs)/2)
+
+	for i := 0; i < len(typeValuePairs); i += 2 {
+		typeName, ok := typeValuePairs[i].(string)
+		if !ok {
+			panic("FromOneOf: type name must be a string")
+		}
+		typeValue := typeValuePairs[i+1]
+
+		entries = append(entries, polymorphicTypeEntry{
+			TypeName:  typeName,
+			TypeValue: typeValue,
+			FieldName: typeName + "_id", // Default field name
+		})
+		typeNames = append(typeNames, typ(typeValue))
+	}
+
+	// Infer field name from discriminator field (remove _type suffix and add _id)
+	fieldName := discriminatorField
+	if strings.HasSuffix(fieldName, "_type") {
+		fieldName = strings.TrimSuffix(fieldName, "_type") + "_id"
+	} else {
+		fieldName = fieldName + "_id"
+	}
+
+	return &polymorphicInverseBuilder{
+		desc: &Descriptor{
+			Name:                   discriminatorField,
+			Type:                   "polymorphic",
+			Field:                  fieldName,
+			AllowedTypes:           typeNames,
+			TypeDiscriminatorField: discriminatorField,
+			IsPolymorphic:          true,
+			Inverse:                true,
+		},
+		entries: entries,
+	}
 }
 
 // Required indicates that this edge is a required field on creation.
@@ -292,9 +368,9 @@ func (b *polymorphicAssocBuilder) StructTag(s string) *polymorphicAssocBuilder {
 	return b
 }
 
-// Annotate adds annotations to the polymorphic edge.
-func (b *polymorphicAssocBuilder) Annotate(annotations ...schema.Annotation) *polymorphicAssocBuilder {
-	b.desc.Annotations = append(b.desc.Annotations, annotations...)
+// Field sets the field that stores the polymorphic foreign key.
+func (b *polymorphicAssocBuilder) Field(field string) *polymorphicAssocBuilder {
+	b.desc.Field = field
 	return b
 }
 
@@ -304,8 +380,73 @@ func (b *polymorphicAssocBuilder) Comment(comment string) *polymorphicAssocBuild
 	return b
 }
 
+// Annotations adds annotations to the polymorphic edge.
+func (b *polymorphicAssocBuilder) Annotations(annotations ...schema.Annotation) *polymorphicAssocBuilder {
+	b.desc.Annotations = append(b.desc.Annotations, annotations...)
+	return b
+}
+
 // Descriptor returns the edge descriptor.
 func (b *polymorphicAssocBuilder) Descriptor() *Descriptor {
+	return b.desc
+}
+
+// polymorphicInverseBuilder is the builder for polymorphic inverse edges using FromOneOf pattern.
+type polymorphicInverseBuilder struct {
+	desc    *Descriptor
+	entries []polymorphicTypeEntry
+}
+
+// Ref sets the referenced-edge of this polymorphic inverse edge.
+func (b *polymorphicInverseBuilder) Ref(ref string) *polymorphicInverseBuilder {
+	b.desc.RefName = ref
+	return b
+}
+
+// Required indicates that this edge is a required field on creation.
+func (b *polymorphicInverseBuilder) Required() *polymorphicInverseBuilder {
+	b.desc.Required = true
+	return b
+}
+
+// Unique indicates that this edge is unique (creates a unique constraint).
+func (b *polymorphicInverseBuilder) Unique() *polymorphicInverseBuilder {
+	b.desc.Unique = true
+	return b
+}
+
+// Immutable indicates that this edge cannot be updated.
+func (b *polymorphicInverseBuilder) Immutable() *polymorphicInverseBuilder {
+	b.desc.Immutable = true
+	return b
+}
+
+// StructTag sets the struct tag of the polymorphic inverse edge.
+func (b *polymorphicInverseBuilder) StructTag(s string) *polymorphicInverseBuilder {
+	b.desc.Tag = s
+	return b
+}
+
+// Field sets the field that stores the polymorphic foreign key.
+func (b *polymorphicInverseBuilder) Field(field string) *polymorphicInverseBuilder {
+	b.desc.Field = field
+	return b
+}
+
+// Comment sets the comment of the polymorphic inverse edge.
+func (b *polymorphicInverseBuilder) Comment(comment string) *polymorphicInverseBuilder {
+	b.desc.Comment = comment
+	return b
+}
+
+// Annotations adds annotations to the polymorphic inverse edge.
+func (b *polymorphicInverseBuilder) Annotations(annotations ...schema.Annotation) *polymorphicInverseBuilder {
+	b.desc.Annotations = append(b.desc.Annotations, annotations...)
+	return b
+}
+
+// Descriptor returns the edge descriptor.
+func (b *polymorphicInverseBuilder) Descriptor() *Descriptor {
 	return b.desc
 }
 

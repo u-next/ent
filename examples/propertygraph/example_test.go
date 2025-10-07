@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"entgo.io/ent/dialect"
-	"entgo.io/ent/dialect/gql/schema"
+	"entgo.io/ent/dialect/sql/schema"
 	"entgo.io/ent/entc"
 	"entgo.io/ent/entc/gen"
 )
@@ -16,15 +16,15 @@ func TestPropertyGraphGeneration(t *testing.T) {
 
 	// Load the graph
 	graph, err := entc.LoadGraph("./ent/schema", &gen.Config{
-		Package: "example/gqlcodegen/ent",
-		Storage: &gen.Storage{Name: "gql"},
+		Package:  "example/gqlcodegen/ent",
+		Features: []gen.Feature{gen.FeaturePropertyGraph},
 	})
 	if err != nil {
 		t.Fatalf("failed to load graph: %v", err)
 	}
 
 	// Generate property graph
-	pgs, err := graph.PropertyGraphs()
+	pgs, err := graph.BuildPropertyGraphs()
 	if err != nil {
 		t.Fatalf("failed to generate property graph: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestPropertyGraphGeneration(t *testing.T) {
 
 	// Generate DDL
 	ctx := context.Background()
-	ddl, err := schema.PropertyGraphDDL(ctx, schema.DDLArgs{
+	ddl, err := schema.DDL(ctx, schema.DDLArgs{
 		Dialect:        dialect.Spanner,
 		PropertyGraphs: []*schema.PropertyGraph{pg},
 	})
@@ -78,7 +78,7 @@ func TestM2MRelationships(t *testing.T) {
 	}
 
 	// Generate property graph
-	pgs, err := graph.PropertyGraphs()
+	pgs, err := graph.BuildPropertyGraphs()
 	if err != nil {
 		t.Fatalf("failed to generate property graph: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestSelfReferentialRelationships(t *testing.T) {
 	}
 
 	// Generate property graph
-	pgs, err := graph.PropertyGraphs()
+	pgs, err := graph.BuildPropertyGraphs()
 	if err != nil {
 		t.Fatalf("failed to generate property graph: %v", err)
 	}
@@ -480,7 +480,7 @@ func TestSchemaValidation(t *testing.T) {
 	t.Logf("Total relationships (edges): %d", totalEdges)
 
 	// Generate property graph to validate structure
-	pgs, err := graph.PropertyGraphs()
+	pgs, err := graph.BuildPropertyGraphs()
 	if err != nil {
 		t.Fatalf("failed to generate property graph for validation: %v", err)
 	}

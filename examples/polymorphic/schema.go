@@ -78,7 +78,7 @@ func (BonusMaterial) Edges() []ent.Edge {
 	return []ent.Edge{}
 }
 
-// AudioConsumable demonstrates a polymorphic edge.
+// AudioConsumable demonstrates a polymorphic edge using ToOneOf.
 // It can be linked to Media, MediaEpisode, Trailer, or BonusMaterial.
 type AudioConsumable struct {
 	ent.Schema
@@ -86,7 +86,6 @@ type AudioConsumable struct {
 
 func (AudioConsumable) Fields() []ent.Field {
 	return []ent.Field{
-		field.String("entity_nid").Comment("Polymorphic foreign key"),
 		field.String("entity_type").Comment("Type discriminator"),
 		field.String("format").Comment("Audio format like mp3, aac, etc."),
 		field.Int("bitrate").Optional(),
@@ -96,12 +95,13 @@ func (AudioConsumable) Fields() []ent.Field {
 
 func (AudioConsumable) Edges() []ent.Edge {
 	return []ent.Edge{
-		// Polymorphic edge that can connect to multiple entity types
-		edge.PolyTo("entity", Media.Type, MediaEpisode.Type, Trailer.Type, BonusMaterial.Type).
-			TypeField("entity_type").
-			Field("entity_nid").
-			Required().
-			Comment("The entity this audio consumable is associated with"),
+		edge.ToOneOf(
+			"entity_type",
+			"media", Media.Type,
+			"media_episode", MediaEpisode.Type,
+			"trailer", Trailer.Type,
+			"bonus_material", BonusMaterial.Type,
+		).Required().Comment("The entity this audio consumable is associated with"),
 	}
 }
 
@@ -112,7 +112,6 @@ type VideoConsumable struct {
 
 func (VideoConsumable) Fields() []ent.Field {
 	return []ent.Field{
-		field.String("entity_nid").Comment("Polymorphic foreign key"),
 		field.String("entity_type").Comment("Type discriminator"),
 		field.String("format").Comment("Video format like mp4, avi, etc."),
 		field.String("resolution").Optional(),
@@ -123,12 +122,13 @@ func (VideoConsumable) Fields() []ent.Field {
 
 func (VideoConsumable) Edges() []ent.Edge {
 	return []ent.Edge{
-		// Another polymorphic edge with same target types
-		edge.PolyTo("entity", Media.Type, MediaEpisode.Type, Trailer.Type, BonusMaterial.Type).
-			TypeField("entity_type").
-			Field("entity_nid").
-			Required().
-			Comment("The entity this video consumable is associated with"),
+		edge.ToOneOf(
+			"entity_type",
+			"media", Media.Type,
+			"media_episode", MediaEpisode.Type,
+			"trailer", Trailer.Type,
+			"bonus_material", BonusMaterial.Type,
+		).Required().Comment("The entity this video consumable is associated with"),
 	}
 }
 
@@ -139,7 +139,6 @@ type AvailabilitySummary struct {
 
 func (AvailabilitySummary) Fields() []ent.Field {
 	return []ent.Field{
-		field.String("entity_nid").Comment("Polymorphic foreign key"),
 		field.String("entity_type").Comment("Type discriminator"),
 		field.String("platform_code").Comment("Platform identifier"),
 		field.Bool("available").Default(false),
@@ -150,12 +149,12 @@ func (AvailabilitySummary) Fields() []ent.Field {
 
 func (AvailabilitySummary) Edges() []ent.Edge {
 	return []ent.Edge{
-		// Polymorphic edge to availability entities
-		edge.PolyTo("entity", Media.Type, MediaEpisode.Type, Trailer.Type).
-			TypeField("entity_type").
-			Field("entity_nid").
-			Required().
-			Comment("The entity this availability summary is for"),
+		edge.ToOneOf(
+			"entity_type",
+			"media", Media.Type,
+			"media_episode", MediaEpisode.Type,
+			"trailer", Trailer.Type,
+		).Required().Comment("The entity this availability summary is for"),
 	}
 }
 
@@ -166,7 +165,6 @@ type Credit struct {
 
 func (Credit) Fields() []ent.Field {
 	return []ent.Field{
-		field.String("entity_nid").Comment("Polymorphic foreign key"),
 		field.String("entity_type").Comment("Type discriminator"),
 		field.String("role").Comment("Role in the production"),
 		field.String("character").Optional().Comment("Character name if applicable"),
@@ -176,12 +174,11 @@ func (Credit) Fields() []ent.Field {
 
 func (Credit) Edges() []ent.Edge {
 	return []ent.Edge{
-		// Polymorphic edge for credits
-		edge.PolyTo("entity", Media.Type, MediaEpisode.Type).
-			TypeField("entity_type").
-			Field("entity_nid").
-			Required().
-			Comment("The entity this credit is associated with"),
+		edge.ToOneOf(
+			"entity_type",
+			"media", Media.Type,
+			"media_episode", MediaEpisode.Type,
+		).Required().Comment("The entity this credit is associated with"),
 	}
 }
 
@@ -194,7 +191,6 @@ type UserPreference struct {
 func (UserPreference) Fields() []ent.Field {
 	return []ent.Field{
 		field.String("user_id").Comment("User identifier"),
-		field.String("entity_nid").Comment("Polymorphic foreign key"),
 		field.String("entity_type").Comment("Type discriminator"),
 		field.String("preference_value").Comment("The preference setting"),
 		field.Time("created_at").Default(func() time.Time { return time.Now() }),
@@ -203,12 +199,173 @@ func (UserPreference) Fields() []ent.Field {
 
 func (UserPreference) Edges() []ent.Edge {
 	return []ent.Edge{
-		// Unique polymorphic edge - each user can have only one preference per entity
-		edge.PolyTo("entity", Media.Type, MediaEpisode.Type, Trailer.Type).
-			TypeField("entity_type").
-			Field("entity_nid").
-			Required().
-			Unique().
-			Comment("The entity this preference is for (unique per user per entity)"),
+		edge.ToOneOf(
+			"entity_type",
+			"media", Media.Type,
+			"media_episode", MediaEpisode.Type,
+			"trailer", Trailer.Type,
+		).Required().Unique().Comment("The entity this preference is for (unique per user per entity)"),
+	}
+}
+
+// TextMessage represents a text message.
+type TextMessage struct {
+	ent.Schema
+}
+
+func (TextMessage) Fields() []ent.Field {
+	return []ent.Field{
+		field.String("content"),
+		field.String("encoding").Default("utf-8"),
+	}
+}
+
+func (TextMessage) Edges() []ent.Edge {
+	return []ent.Edge{}
+}
+
+// PhotoMessage represents a photo message.
+type PhotoMessage struct {
+	ent.Schema
+}
+
+func (PhotoMessage) Fields() []ent.Field {
+	return []ent.Field{
+		field.String("photo_url"),
+		field.String("caption").Optional(),
+		field.Int("width").Optional(),
+		field.Int("height").Optional(),
+	}
+}
+
+func (PhotoMessage) Edges() []ent.Edge {
+	return []ent.Edge{}
+}
+
+// VideoMessage represents a video message.
+type VideoMessage struct {
+	ent.Schema
+}
+
+func (VideoMessage) Fields() []ent.Field {
+	return []ent.Field{
+		field.String("video_url"),
+		field.String("thumbnail_url").Optional(),
+		field.Int("duration_seconds").Optional(),
+	}
+}
+
+func (VideoMessage) Edges() []ent.Edge {
+	return []ent.Edge{}
+}
+
+// Message demonstrates ToOneOf polymorphic edge.
+type Message struct {
+	ent.Schema
+}
+
+func (Message) Fields() []ent.Field {
+	return []ent.Field{
+		field.String("sender_id"),
+		field.String("message_type"),
+		field.Time("created_at").Default(func() time.Time { return time.Now() }),
+	}
+}
+
+func (Message) Edges() []ent.Edge {
+	return []ent.Edge{
+		edge.ToOneOf(
+			"message_type",
+			"text_message", TextMessage.Type,
+			"photo_message", PhotoMessage.Type,
+			"video_message", VideoMessage.Type,
+		).Required().Comment("Polymorphic reference to message content"),
+	}
+}
+
+// LocalUser represents a local user account.
+type LocalUser struct {
+	ent.Schema
+}
+
+func (LocalUser) Fields() []ent.Field {
+	return []ent.Field{
+		field.String("username").Unique(),
+		field.String("email").Unique(),
+		field.String("password_hash"),
+	}
+}
+
+func (LocalUser) Edges() []ent.Edge {
+	return []ent.Edge{}
+}
+
+// ForeignUser represents a user from external system.
+type ForeignUser struct {
+	ent.Schema
+}
+
+func (ForeignUser) Fields() []ent.Field {
+	return []ent.Field{
+		field.String("external_id").Unique(),
+		field.String("provider"),
+		field.String("display_name"),
+	}
+}
+
+func (ForeignUser) Edges() []ent.Edge {
+	return []ent.Edge{}
+}
+
+// Object demonstrates FromOneOf polymorphic inverse edge.
+type Object struct {
+	ent.Schema
+}
+
+func (Object) Fields() []ent.Field {
+	return []ent.Field{
+		field.String("name"),
+		field.String("owner_user_type"),
+		field.String("description").Optional(),
+	}
+}
+
+func (Object) Edges() []ent.Edge {
+	return []ent.Edge{
+		edge.FromOneOf(
+			"owner_user_type",
+			"local_user", LocalUser.Type,
+			"foreign_user", ForeignUser.Type,
+		).Unique().Required().Comment("Polymorphic reference to object owner"),
+	}
+}
+
+// TaskTemplate demonstrates multiple polymorphic edges.
+type TaskTemplate struct {
+	ent.Schema
+}
+
+func (TaskTemplate) Fields() []ent.Field {
+	return []ent.Field{
+		field.String("name"),
+		field.String("assignee_type"),
+		field.String("reporter_type"),
+		field.String("description").Optional(),
+	}
+}
+
+func (TaskTemplate) Edges() []ent.Edge {
+	return []ent.Edge{
+		edge.ToOneOf(
+			"assignee_type",
+			"local_user", LocalUser.Type,
+			"foreign_user", ForeignUser.Type,
+		).Comment("User assigned to this task"),
+		
+		edge.ToOneOf(
+			"reporter_type", 
+			"local_user", LocalUser.Type,
+			"foreign_user", ForeignUser.Type,
+		).Required().Comment("User who reported this task"),
 	}
 }
