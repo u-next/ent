@@ -277,6 +277,7 @@ type FilterBuilder struct {
 	sql.Builder
 	where     bool
 	predicate *sql.Predicate
+	collected [][]*sql.Predicate
 }
 
 // Filter creates a new FILTER statement builder.
@@ -291,7 +292,15 @@ func (f *FilterBuilder) Where() *FilterBuilder {
 
 // Predicate sets the boolean predicate expression to filter by.
 func (f *FilterBuilder) Predicate(pred *sql.Predicate) *FilterBuilder {
-	f.predicate = pred
+	if len(f.collected) > 0 {
+		f.collected[len(f.collected)-1] = append(f.collected[len(f.collected)-1], pred)
+		return f
+	}
+	if f.predicate == nil {
+		f.predicate = pred
+	} else {
+		f.predicate = sql.And(f.predicate, pred)
+	}
 	return f
 }
 
@@ -306,6 +315,29 @@ func (f *FilterBuilder) Query() (string, []any) {
 		f.Join(f.predicate)
 	}
 	return f.String(), f.GetArgs()
+}
+
+// CollectPredicates indicates the appended predicates should be collected
+// and not set as the main predicate.
+func (f *FilterBuilder) CollectPredicates() *FilterBuilder {
+	f.collected = append(f.collected, []*sql.Predicate{})
+	return f
+}
+
+// CollectedPredicates returns the collected predicates.
+func (f *FilterBuilder) CollectedPredicates() []*sql.Predicate {
+	if len(f.collected) == 0 {
+		return nil
+	}
+	return f.collected[len(f.collected)-1]
+}
+
+// UncollectedPredicates stop collecting predicates.
+func (f *FilterBuilder) UncollectedPredicates() *FilterBuilder {
+	if len(f.collected) > 0 {
+		f.collected = f.collected[:len(f.collected)-1]
+	}
+	return f
 }
 
 func (f *FilterBuilder) stmt() {}
@@ -924,8 +956,9 @@ func Concat(p, q *PathPattern) sql.Querier {
 
 type GraphPatternBuilder struct {
 	sql.Builder
-	patterns []sql.Querier
-	where    *sql.Predicate
+	patterns  []sql.Querier
+	where     *sql.Predicate
+	collected [][]*sql.Predicate
 }
 
 func GraphPattern(patterns ...Pattern) *GraphPatternBuilder {
@@ -940,8 +973,14 @@ func (g *GraphPatternBuilder) AppendPatterns(patterns ...Pattern) *GraphPatternB
 }
 
 func (g *GraphPatternBuilder) Where(pred *sql.Predicate) *GraphPatternBuilder {
+	if len(g.collected) > 0 {
+		g.collected[len(g.collected)-1] = append(g.collected[len(g.collected)-1], pred)
+		return g
+	}
 	if g.where == nil {
 		g.where = pred
+	} else {
+		g.where = sql.And(g.where, pred)
 	}
 	return g
 }
@@ -956,7 +995,30 @@ func (w *GraphPatternBuilder) Query() (string, []any) {
 	return w.String(), w.GetArgs()
 }
 
-func (w *GraphPatternBuilder) pattern() {}
+// CollectPredicates indicates the appended predicates should be collected
+// and not appended to the WHERE clause.
+func (g *GraphPatternBuilder) CollectPredicates() *GraphPatternBuilder {
+	g.collected = append(g.collected, []*sql.Predicate{})
+	return g
+}
+
+// CollectedPredicates returns the collected predicates.
+func (g *GraphPatternBuilder) CollectedPredicates() []*sql.Predicate {
+	if len(g.collected) == 0 {
+		return nil
+	}
+	return g.collected[len(g.collected)-1]
+}
+
+// UncollectedPredicates stop collecting predicates.
+func (g *GraphPatternBuilder) UncollectedPredicates() *GraphPatternBuilder {
+	if len(g.collected) > 0 {
+		g.collected = g.collected[:len(g.collected)-1]
+	}
+	return g
+}
+
+func (g *GraphPatternBuilder) pattern() {}
 
 // Pattern is an interface for graph patterns.
 type Pattern interface {
@@ -1131,7 +1193,8 @@ func (p *PathPattern) pattern() {}
 // NodePattern is a builder for node patterns.
 type NodePattern struct {
 	sql.Builder
-	filler *patternFiller
+	filler    *patternFiller
+	collected [][]*sql.Predicate
 }
 
 // N creates a new node pattern builder.
@@ -1199,7 +1262,15 @@ func (n *NodePattern) PropertiesExpr(props map[string]sql.Querier) *NodePattern 
 
 // Where adds a WHERE condition.
 func (n *NodePattern) Where(condition *sql.Predicate) *NodePattern {
-	n.filler.where = condition
+	if len(n.collected) > 0 {
+		n.collected[len(n.collected)-1] = append(n.collected[len(n.collected)-1], condition)
+		return n
+	}
+	if n.filler.where == nil {
+		n.filler.where = condition
+	} else {
+		n.filler.where = sql.And(n.filler.where, condition)
+	}
 	return n
 }
 
@@ -1229,6 +1300,29 @@ func (n *NodePattern) Query() (string, []any) {
 	return b.String(), b.GetArgs()
 }
 
+// CollectPredicates indicates the appended predicates should be collected
+// and not appended to the WHERE clause.
+func (n *NodePattern) CollectPredicates() *NodePattern {
+	n.collected = append(n.collected, []*sql.Predicate{})
+	return n
+}
+
+// CollectedPredicates returns the collected predicates.
+func (n *NodePattern) CollectedPredicates() []*sql.Predicate {
+	if len(n.collected) == 0 {
+		return nil
+	}
+	return n.collected[len(n.collected)-1]
+}
+
+// UncollectedPredicates stop collecting predicates.
+func (n *NodePattern) UncollectedPredicates() *NodePattern {
+	if len(n.collected) > 0 {
+		n.collected = n.collected[:len(n.collected)-1]
+	}
+	return n
+}
+
 func (n *NodePattern) pattern() {}
 
 // EdgeDirection represents edge direction types.
@@ -1246,6 +1340,7 @@ type EdgePattern struct {
 	filler      *patternFiller
 	direction   EdgeDirection
 	abbreviated bool
+	collected   [][]*sql.Predicate
 }
 
 // E creates a new edge pattern builder.
@@ -1307,20 +1402,42 @@ func (e *EdgePattern) LabelExpr(expr *labelExpr) *EdgePattern {
 }
 
 // Property adds a property filter.
-func (e *EdgePattern) Property(key string, value sql.Querier) *EdgePattern {
+func (e *EdgePattern) Property(key string, value any) *EdgePattern {
+	e.filler.properties[key] = sql.V(value)
+	return e
+}
+
+// Properties adds multiple property filters.
+func (e *EdgePattern) Properties(props map[string]any) *EdgePattern {
+	for k, v := range props {
+		e.filler.properties[k] = sql.V(v)
+	}
+	return e
+}
+
+// PropertyExpr adds a property filter.
+func (e *EdgePattern) PropertyExpr(key string, value sql.Querier) *EdgePattern {
 	e.filler.properties[key] = value
 	return e
 }
 
 // Properties adds multiple property filters.
-func (e *EdgePattern) Properties(props map[string]sql.Querier) *EdgePattern {
+func (e *EdgePattern) propertiesExpr(props map[string]sql.Querier) *EdgePattern {
 	maps.Copy(e.filler.properties, props)
 	return e
 }
 
 // Where adds a WHERE condition.
 func (e *EdgePattern) Where(condition *sql.Predicate) *EdgePattern {
-	e.filler.where = condition
+	if len(e.collected) > 0 {
+		e.collected[len(e.collected)-1] = append(e.collected[len(e.collected)-1], condition)
+		return e
+	}
+	if e.filler.where == nil {
+		e.filler.where = condition
+	} else {
+		e.filler.where = sql.And(e.filler.where, condition)
+	}
 	return e
 }
 
@@ -1352,6 +1469,29 @@ func (e *EdgePattern) Query() (string, []any) {
 		b.WriteByte('>')
 	}
 	return b.String(), b.GetArgs()
+}
+
+// CollectPredicates indicates the appended predicates should be collected
+// and not appended to the WHERE clause.
+func (e *EdgePattern) CollectPredicates() *EdgePattern {
+	e.collected = append(e.collected, []*sql.Predicate{})
+	return e
+}
+
+// CollectedPredicates returns the collected predicates.
+func (e *EdgePattern) CollectedPredicates() []*sql.Predicate {
+	if len(e.collected) == 0 {
+		return nil
+	}
+	return e.collected[len(e.collected)-1]
+}
+
+// UncollectedPredicates stop collecting predicates.
+func (e *EdgePattern) UncollectedPredicates() *EdgePattern {
+	if len(e.collected) > 0 {
+		e.collected = e.collected[:len(e.collected)-1]
+	}
+	return e
 }
 
 func (e *EdgePattern) pattern() {}
